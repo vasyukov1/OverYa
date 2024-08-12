@@ -108,13 +108,6 @@ func main() {
 						}
 					}
 				}
-
-				//switch update.Message.Text {
-				//case "open":
-				//	msg.ReplyMarkup = numericInlineKeyboard
-				//default:
-				//	msg.Text = "I don't understand you(("
-				//}
 			}
 
 			if _, err := bot.Send(msg); err != nil {
@@ -122,20 +115,17 @@ func main() {
 			}
 
 		} else if update.CallbackQuery != nil {
-			callback := tgbotapi.NewCallback(update.CallbackQuery.ID, update.CallbackQuery.Data)
-			if _, err := bot.Request(callback); err != nil {
-				log.Panic(err)
-			}
-
-			msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, update.CallbackQuery.Data)
-			if _, err := bot.Send(msg); err != nil {
-				panic(err)
-			}
+			handleCallbackQuery(bot, update.CallbackQuery, db)
 		}
 	}
 }
 func handleAdminBroadcast(bot *tgbotapi.BotAPI, message *tgbotapi.Message, update tgbotapi.Update, db *database.DB) {
 	chatID := message.Chat.ID
+
+	if update.CallbackQuery != nil {
+		handleCallbackQuery(bot, update.CallbackQuery, db)
+		return
+	}
 
 	// Обработка сообщения с текстом, когда broadcastMsg пуст
 	if message.Text != "" && broadcastMsg[chatID] == "" {
@@ -145,22 +135,14 @@ func handleAdminBroadcast(bot *tgbotapi.BotAPI, message *tgbotapi.Message, updat
 	}
 	// Обработка команды "/ok"
 	if message.Text == "/ok" {
-		promptForDescription(bot, chatID)
-		return
-	}
-	// Обработка команды "/send"
-	if message.Text == "/send" {
-		sendBroadcast(bot, chatID, db)
-		return
-	}
-	// Обработка inline-кнопок для описания
-	if update.CallbackQuery != nil {
-		handleCallbackQuery(bot, update, chatID)
+		promptForDescriptionChoice(bot, chatID)
 		return
 	}
 	// Обработка текстовых сообщений для описания, если включен режим описания
 	if isDescriptionMode[chatID] {
-		handleDescriptionInput(bot, message, chatID)
+		description[chatID] = message.Text
+		sendBroadcast(bot, chatID, db)
+		isDescriptionMode[chatID] = false
 		return
 	}
 	// Обработка медиа-файлов
@@ -179,7 +161,7 @@ func broadcast(bot *tgbotapi.BotAPI, message string, attachments []interface{}, 
 		}
 
 		// Send type of materials and description.
-		subjectWithDescription := message + description
+		subjectWithDescription := message + "\n\n" + description
 		msg := tgbotapi.NewMessage(chatID, subjectWithDescription)
 		if _, err := bot.Send(msg); err != nil {
 			log.Printf("Failed to send message to %v: %v\n", chatID, err)
@@ -219,50 +201,45 @@ func broadcast(bot *tgbotapi.BotAPI, message string, attachments []interface{}, 
 	}
 }
 
+func promptForDescriptionChoice(bot *tgbotapi.BotAPI, chatID int64) {
+	msg := tgbotapi.NewMessage(chatID, "Do you want to add a description?")
+	buttons := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("Yes", "yes_description"),
+			tgbotapi.NewInlineKeyboardButtonData("No", "no_description"),
+		),
+	)
+	msg.ReplyMarkup = buttons
+	if _, err := bot.Send(msg); err != nil {
+		log.Printf("Failed to send message to %v: %v", chatID, err)
+	}
+}
+
+func handleCallbackQuery(bot *tgbotapi.BotAPI, callbackQuery *tgbotapi.CallbackQuery, db *database.DB) {
+	chatID := callbackQuery.Message.Chat.ID
+	data := callbackQuery.Data
+	switch data {
+	case "yes_description":
+		msg := tgbotapi.NewMessage(chatID, "Please provide the description")
+		if _, err := bot.Send(msg); err != nil {
+			log.Printf("Failed to send message to %v: %v", chatID, err)
+		}
+		isDescriptionMode[chatID] = true
+	case "no_description":
+		sendBroadcast(bot, chatID, db)
+	}
+
+	callback := tgbotapi.NewCallback(callbackQuery.ID, "")
+	if _, err := bot.Request(callback); err != nil {
+		log.Printf("Callback error: %v", err)
+	}
+}
+
 // Функция для запроса медиа-файлов у администратора
 func promptForAttachments(bot *tgbotapi.BotAPI, chatID int64) {
 	msg := tgbotapi.NewMessage(chatID, "Attach media (photo, video, file) and send /ok when done.")
 	if _, err := bot.Send(msg); err != nil {
 		log.Printf("Failed to send message to %v: %v", chatID, err)
-	}
-}
-
-// Функция для запроса описания у администратора
-func promptForDescription(bot *tgbotapi.BotAPI, chatID int64) {
-	var descriptionKeyboard = tgbotapi.NewInlineKeyboardMarkup(
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("Yes", "Yes"),
-			tgbotapi.NewInlineKeyboardButtonData("No", "/send"),
-		),
-	)
-	msg := tgbotapi.NewMessage(chatID, "Do you need a description?")
-	msg.ReplyMarkup = descriptionKeyboard
-	if _, err := bot.Send(msg); err != nil {
-		log.Printf("Failed to send message to %v: %v", chatID, err)
-	}
-}
-
-// Функция для обработки текстового ввода описания
-func handleDescriptionInput(bot *tgbotapi.BotAPI, message *tgbotapi.Message, chatID int64) {
-	description[chatID] = message.Text
-	isDescriptionMode[chatID] = false
-	msg := tgbotapi.NewMessage(chatID, "Tap /send")
-	if _, err := bot.Send(msg); err != nil {
-		log.Printf("Failed to send message to %v: %v", chatID, err)
-	}
-}
-
-func handleCallbackQuery(bot *tgbotapi.BotAPI, update tgbotapi.Update, chatID int64) {
-	if update.CallbackQuery.Data == "Yes" {
-		callback := tgbotapi.NewCallback(update.CallbackQuery.ID, update.CallbackQuery.Data)
-		if _, err := bot.Request(callback); err != nil {
-			log.Printf("Callback error: %v", err)
-		}
-		isDescriptionMode[chatID] = true
-		msg := tgbotapi.NewMessage(chatID, "Send the description")
-		if _, err := bot.Send(msg); err != nil {
-			log.Printf("Failed to send message to %v: %v", chatID, err)
-		}
 	}
 }
 
