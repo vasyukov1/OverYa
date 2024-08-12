@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"github.com/lib/pq"
 	_ "github.com/lib/pq"
 	"log"
 )
@@ -42,41 +43,38 @@ func (db *DB) CreateTables() error {
 	    count_of_posts INT NOT NULL DEFAULT 0
 	);`
 
-	//createSubjectsTable := `
-	//CREATE TABLE IF NOT EXISTS Admins (
-	//    ID SERIAL PRIMARY KEY,
-	//    name VARCHAR(255) NOT NULL
-	//);`
-	//
-	//createElementsTable := `
-	//CREATE TABLE IF NOT EXISTS Elements (
-	//    ID SERIAL PRIMARY KEY,
-	//    name VARCHAR(255) NOT NULL,
-	//    type VARCHAR(50) NOT NULL
-	//);`
-	//
-	//createSubjectElementsTable := `
-	//CREATE TABLE IF NOT EXISTS SubjectElements (
-	//    ID SERIAL PRIMARY KEY,
-	//    subject_id INT NOT NULL REFERENCES Subjects(ID),
-	//    element_id INT NOT NULL REFERENCES Elements(ID)
-	//);`
+	createSubjectsTable := `
+	CREATE TABLE IF NOT EXISTS Subjects (
+	  Name TEXT NOT NULL PRIMARY KEY
+	);`
+
+	createMaterialsTable := `
+	CREATE TABLE IF NOT EXISTS Materials (
+		SubjectName TEXT REFERENCES Subjects(Name) ON DELETE CASCADE,
+	    ControlElement TEXT NOT NULL,
+	    ElementNumber TEXT NOT NULL,
+	    FileIDs TEXT[] NOT NULL,
+	    Description TEXT,
+	    PRIMARY KEY (SubjectName, ControlElement, ElementNumber)
+	);`
 
 	queries := []string{
 		createSubscribersTable,
 		createAdminsTable,
-		//createSubjectsTable,
-		//createElementsTable,
-		//createSubjectElementsTable,
+		createSubjectsTable,
+		createMaterialsTable,
 	}
 	for _, query := range queries {
 		_, err := db.Exec(query)
 		if err != nil {
-			return fmt.Errorf("Error executing SQL request: %v", err)
+			log.Printf("Error executing SQL request: %v", err)
+			return err
 		}
 	}
 	return nil
 }
+
+// ----------------------- USERS -----------------------
 
 func (db *DB) IsSubscriber(chatID int64) bool {
 	var exists bool
@@ -116,4 +114,56 @@ func (db *DB) GetSubscribers() map[int64]bool {
 		log.Printf("Error iterating subscribers: %v", err)
 	}
 	return subscribers
+}
+
+// ----------------------- MATERIALS -----------------------
+
+func (db *DB) AddMaterial(subjectName string, controlElement string, elementNumber int, fileIDs []string, description string) error {
+	_, err := db.Exec(
+		"INSERT INTO Materials (SubjectName, ControlElement, ElementNumber, FileIDs, Description) "+
+			"VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING",
+		subjectName, controlElement, elementNumber, pq.Array(fileIDs), description)
+	return err
+}
+
+func (db *DB) GetMaterial(chatID int64) ([]string, string, error) {
+	var fileIDs []string
+	var description string
+	err := db.QueryRow(
+		"SELECT FileIDs, Description FROM Materials WHERE SubjectName = $1 AND ControlElement = $2 AND ElementNumber = $3",
+		tempSubject[chatID], tempControlElement[chatID], tempElementNumber[chatID]).Scan(pq.Array(&fileIDs), &description)
+	if err != nil {
+		return nil, "", err
+	}
+	return fileIDs, description, nil
+}
+
+// ----------------------- TEMP STORAGE -----------------------
+
+var tempSubject = make(map[int64]string)
+var tempControlElement = make(map[int64]string)
+var tempElementNumber = make(map[int64]int)
+
+func (db *DB) SetTempSubject(chatID int64, subject string) {
+	tempSubject[chatID] = subject
+}
+
+func (db *DB) SetTempControlElement(chatID int64, controlElement string) {
+	tempControlElement[chatID] = controlElement
+}
+
+func (db *DB) SetTempElementNumber(chatID int64, elementNumber int) {
+	tempElementNumber[chatID] = elementNumber
+}
+
+func (db *DB) GetTempSubject(chatID int64) string {
+	return tempSubject[chatID]
+}
+
+func (db *DB) GetTempControlElement(chatID int64) string {
+	return tempControlElement[chatID]
+}
+
+func (db *DB) GetTempElementNUmber(chatID int64) int {
+	return tempElementNumber[chatID]
 }
