@@ -2,6 +2,7 @@ package database
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"github.com/lib/pq"
 	_ "github.com/lib/pq"
@@ -116,6 +117,19 @@ func (db *DB) GetSubscribers() map[int64]bool {
 	return subscribers
 }
 
+// ----------------------- SUBJECTS -----------------------
+
+func (db *DB) SubjectExists(subjectName string) (bool, error) {
+	var exists bool
+	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM Subjects WHERE Name=$1)", subjectName).Scan(&exists)
+	return exists, err
+}
+
+func (db *DB) AddSubject(subjectName string) error {
+	_, err := db.Exec("INSERT INTO Subjects (Name) VALUES ($1) ON CONFLICT DO NOTHING", subjectName)
+	return err
+}
+
 // ----------------------- MATERIALS -----------------------
 
 func (db *DB) AddMaterial(subjectName string, controlElement string, elementNumber int, fileIDs []string, description string) error {
@@ -123,6 +137,7 @@ func (db *DB) AddMaterial(subjectName string, controlElement string, elementNumb
 		"INSERT INTO Materials (SubjectName, ControlElement, ElementNumber, FileIDs, Description) "+
 			"VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING",
 		subjectName, controlElement, elementNumber, pq.Array(fileIDs), description)
+	//log.Printf("fileIDs: %v\n", fileIDs[0])
 	return err
 }
 
@@ -133,6 +148,9 @@ func (db *DB) GetMaterial(chatID int64) ([]string, string, error) {
 		"SELECT FileIDs, Description FROM Materials WHERE SubjectName = $1 AND ControlElement = $2 AND ElementNumber = $3",
 		tempSubject[chatID], tempControlElement[chatID], tempElementNumber[chatID]).Scan(pq.Array(&fileIDs), &description)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, "", nil
+		}
 		return nil, "", err
 	}
 	return fileIDs, description, nil

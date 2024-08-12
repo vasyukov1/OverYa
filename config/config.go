@@ -8,8 +8,9 @@ import (
 )
 
 type Config struct {
-	Token   string
-	AdminID int64
+	Token           string
+	AdminID         int64
+	TelegramChannel int64
 }
 
 func LoadConfig() *Config {
@@ -28,14 +29,23 @@ func LoadConfig() *Config {
 	if adminIDStr == "" {
 		log.Fatal("ADMIN_ID is not set")
 	}
-
 	adminID, err := strconv.ParseInt(adminIDStr, 10, 64)
 	if err != nil {
 		log.Fatal("Invalid ADMIN_ID")
 	}
 
+	telegramChannelStr := os.Getenv("TELEGRAM_CHANNEL")
+	if telegramChannelStr == "" {
+		log.Fatal("TELEGRAM_CHANNEL is not set")
+	}
+	telegramChannel, err := strconv.ParseInt(telegramChannelStr, 10, 64)
+	if err != nil {
+		log.Fatal("Invalid TELEGRAM_CHANNEL")
+	}
+
 	return &Config{
-		Token:   token,
-		AdminID: adminID,
+		Token:           token,
+		AdminID:         adminID,
+		TelegramChannel: telegramChannel,
 	}
 }

@@ -26,10 +26,11 @@ func main() {
 		log.Panic(err)
 	}
 	// We need to settle it: = false
-	bot.Debug = true
+	bot.Debug = false
 	log.Printf("Authorized on account %s", bot.Self.UserName)
 
 	adminMain := cfg.AdminID
+	telegramChannel := cfg.TelegramChannel
 
 	db, err := database.NewDB()
 	if err != nil {
@@ -61,7 +62,7 @@ func main() {
 			}
 
 			if chatID == adminMain && isBroadcastMode[chatID] {
-				handleAdminBroadcast(bot, update.Message, update, db)
+				handleAdminBroadcast(bot, update.Message, update, db, telegramChannel)
 				continue
 			}
 
@@ -80,8 +81,6 @@ func main() {
 			case "get_materials":
 				materialStep[chatID] = "awaiting_subject"
 				msg.Text = "Please enter the subject name"
-			default:
-				msg.Text = "I don't know that command"
 			}
 
 			if update.Message.Command() == "" {
@@ -89,15 +88,14 @@ func main() {
 				if materialStep[chatID] != "" {
 					switch materialStep[chatID] {
 					case "awaiting_subject":
-						msg.Text = "Please enter the control element (e.g., lecture, seminar) and its number"
+						msg.Text = "Please enter the control element (e.g., lecture, seminar)"
 						db.SetTempSubject(chatID, update.Message.Text)
 						materialStep[chatID] = "awaiting_control_element"
 					case "awaiting_control_element":
 						msg.Text = "Please enter the number of element"
 						db.SetTempControlElement(chatID, update.Message.Text)
-						materialStep[chatID] = "awaiting_control_element"
+						materialStep[chatID] = "awaiting_element_number"
 					case "awaiting_element_number":
-						msg.Text = "Please enter the number of element"
 						elementNumberForGet, err := strconv.Atoi(update.Message.Text)
 						if err != nil {
 							msg.Text = "This element does not exist"
@@ -115,89 +113,125 @@ func main() {
 			}
 
 		} else if update.CallbackQuery != nil {
-			handleCallbackQuery(bot, update.CallbackQuery, db)
+			handleCallbackQuery(bot, update.CallbackQuery, db, telegramChannel)
 		}
 	}
 }
-func handleAdminBroadcast(bot *tgbotapi.BotAPI, message *tgbotapi.Message, update tgbotapi.Update, db *database.DB) {
+
+func handleAdminBroadcast(bot *tgbotapi.BotAPI, message *tgbotapi.Message, update tgbotapi.Update, db *database.DB, telegramChannel int64) {
 	chatID := message.Chat.ID
 
 	if update.CallbackQuery != nil {
-		handleCallbackQuery(bot, update.CallbackQuery, db)
+		handleCallbackQuery(bot, update.CallbackQuery, db, telegramChannel)
 		return
 	}
 
-	// Обработка сообщения с текстом, когда broadcastMsg пуст
 	if message.Text != "" && broadcastMsg[chatID] == "" {
 		broadcastMsg[chatID] = message.Text
 		promptForAttachments(bot, chatID)
 		return
 	}
-	// Обработка команды "/ok"
 	if message.Text == "/ok" {
 		promptForDescriptionChoice(bot, chatID)
 		return
 	}
-	// Обработка текстовых сообщений для описания, если включен режим описания
 	if isDescriptionMode[chatID] {
 		description[chatID] = message.Text
-		sendBroadcast(bot, chatID, db)
+		sendBroadcast(bot, chatID, db, telegramChannel)
 		isDescriptionMode[chatID] = false
 		return
 	}
-	// Обработка медиа-файлов
 	handleMediaAttachments(chatID, message)
 }
 
-func broadcast(bot *tgbotapi.BotAPI, message string, attachments []interface{}, description string, db *database.DB) {
+func broadcast(bot *tgbotapi.BotAPI, message string, attachments []interface{}, description string, db *database.DB, telegramChannel int64) {
 	subscribers := db.GetSubscribers()
 	for chatID := range subscribers {
-		// Send media group if it exists.
 		if len(attachments) > 0 {
 			mediaGroup := tgbotapi.NewMediaGroup(chatID, attachments)
-			if _, err := bot.Send(mediaGroup); err != nil {
+			sentMessages, err := bot.SendMediaGroup(mediaGroup)
+			if err != nil {
 				log.Printf("Send media group error to %v: %v\n", chatID, err)
+			} else {
+				for _, sentMsg := range sentMessages {
+					log.Printf("Sent message ID: %v to chat ID: %v", sentMsg.MessageID, chatID)
+				}
 			}
 		}
 
-		// Send type of materials and description.
 		subjectWithDescription := message + "\n\n" + description
 		msg := tgbotapi.NewMessage(chatID, subjectWithDescription)
 		if _, err := bot.Send(msg); err != nil {
 			log.Printf("Failed to send message to %v: %v\n", chatID, err)
 		}
+	}
 
-		// Here will be sending medias to Tg Channel
-		// and receiving links to these materials
-		// !PLUG!
-		var links []string
-		for _, attachment := range attachments {
-			switch a := attachment.(type) {
-			case tgbotapi.InputMediaPhoto:
-				//links = append(links, a.MediaFileID)
-			case tgbotapi.InputMediaVideo:
-				//links = append(links, a.MediaFileID)
-			case tgbotapi.InputMediaDocument:
-				//links = append(links, a.MediaFileID)
-			default:
-				log.Printf("Unknown media type: %T", a)
-			}
+	var links []string
+	for _, attachment := range attachments {
+		if attachment == nil {
+			continue
+		}
+		var sentMsg tgbotapi.Message
+		var err error
+
+		switch media := attachment.(type) {
+		case tgbotapi.InputMediaPhoto:
+			photoMsg := tgbotapi.NewPhoto(telegramChannel, media.Media)
+			sentMsg, err = bot.Send(photoMsg)
+		case tgbotapi.InputMediaVideo:
+			videoMsg := tgbotapi.NewVideo(telegramChannel, media.Media)
+			sentMsg, err = bot.Send(videoMsg)
+		case tgbotapi.InputMediaDocument:
+			docMsg := tgbotapi.NewDocument(telegramChannel, media.Media)
+			sentMsg, err = bot.Send(docMsg)
+		default:
+			log.Printf("Unknown media type: %T", media)
+			continue
 		}
 
-		parts := strings.Split(message, ",")
-		if len(parts) >= 3 {
-			number, err := strconv.Atoi(parts[2])
+		if err != nil {
+			log.Printf("Failed to send media to channel: %v", err)
+			continue
+		}
+		if sentMsg.Document != nil {
+			links = append(links, sentMsg.Document.FileID)
+		} else if sentMsg.Photo != nil {
+			links = append(links, sentMsg.Photo[0].FileID)
+		}
+	}
+	parts := strings.Split(message, " ")
+	if len(parts) == 3 {
+		subject := strings.TrimSpace(parts[0])
+		controlElement := strings.TrimSpace(parts[1])
+		number, err := strconv.Atoi(strings.TrimSpace(parts[2]))
+		if err != nil {
+			log.Printf("Error converting number to int: %v\n", err)
+		}
+
+		exists, err := db.SubjectExists(subject)
+		if err != nil {
+			log.Printf("Error checking subject existence: %v\n", err)
+			return
+		}
+
+		if !exists {
+			err = db.AddSubject(subject)
 			if err != nil {
-				log.Printf("Error converting number to int: %v\n", err)
-			} else {
-				err := db.AddMaterial(parts[0], parts[1], number, links, description)
-				if err != nil {
-					return
-				}
+				log.Printf("Error adding subject: %v\n", err)
+				return
 			}
+			log.Printf("Added subject: %v\n", subject)
 		} else {
-			log.Printf("Invalid message format: %s", message)
+			log.Printf("Subject exists: %v\n", subject)
 		}
+
+		err = db.AddMaterial(subject, controlElement, number, links, description)
+		if err != nil {
+			return
+		}
+
+	} else {
+		log.Printf("Invalid message format: %v", len(parts))
 	}
 }
 
@@ -215,7 +249,7 @@ func promptForDescriptionChoice(bot *tgbotapi.BotAPI, chatID int64) {
 	}
 }
 
-func handleCallbackQuery(bot *tgbotapi.BotAPI, callbackQuery *tgbotapi.CallbackQuery, db *database.DB) {
+func handleCallbackQuery(bot *tgbotapi.BotAPI, callbackQuery *tgbotapi.CallbackQuery, db *database.DB, telegramChannel int64) {
 	chatID := callbackQuery.Message.Chat.ID
 	data := callbackQuery.Data
 	switch data {
@@ -226,7 +260,7 @@ func handleCallbackQuery(bot *tgbotapi.BotAPI, callbackQuery *tgbotapi.CallbackQ
 		}
 		isDescriptionMode[chatID] = true
 	case "no_description":
-		sendBroadcast(bot, chatID, db)
+		sendBroadcast(bot, chatID, db, telegramChannel)
 	}
 
 	callback := tgbotapi.NewCallback(callbackQuery.ID, "")
@@ -243,9 +277,9 @@ func promptForAttachments(bot *tgbotapi.BotAPI, chatID int64) {
 	}
 }
 
-func sendBroadcast(bot *tgbotapi.BotAPI, chatID int64, db *database.DB) {
+func sendBroadcast(bot *tgbotapi.BotAPI, chatID int64, db *database.DB, telegramChannel int64) {
 	isBroadcastMode[chatID] = false
-	broadcast(bot, broadcastMsg[chatID], attachmentQueue[chatID], description[chatID], db)
+	broadcast(bot, broadcastMsg[chatID], attachmentQueue[chatID], description[chatID], db, telegramChannel)
 	description[chatID] = ""
 	broadcastMsg[chatID] = ""
 	attachmentQueue[chatID] = []interface{}{}
@@ -257,7 +291,7 @@ func sendBroadcast(bot *tgbotapi.BotAPI, chatID int64, db *database.DB) {
 
 // Функция для обработки медиа-файлов
 func handleMediaAttachments(chatID int64, message *tgbotapi.Message) {
-	if message.Photo != nil {
+	if message.Photo != nil && len(message.Photo) > 0 {
 		photo := tgbotapi.NewInputMediaPhoto(tgbotapi.FileID(message.Photo[len(message.Photo)-1].FileID))
 		attachmentQueue[chatID] = append(attachmentQueue[chatID], photo)
 	} else if message.Video != nil {
@@ -280,11 +314,25 @@ func sendMaterial(bot *tgbotapi.BotAPI, chatID int64, db *database.DB) {
 		return
 	}
 
+	log.Printf("STEP 1\n")
+
+	if len(files) == 0 {
+		msg := tgbotapi.NewMessage(chatID, "There are not materials.")
+		if _, err := bot.Send(msg); err != nil {
+			log.Printf("There are not materials for %v: %v", chatID, err)
+		}
+		return
+	}
+
+	log.Printf("STEP 2\n")
+
 	var mediaGroup []interface{}
 	for _, fileID := range files {
 		media := tgbotapi.NewInputMediaPhoto(tgbotapi.FileID(fileID))
 		mediaGroup = append(mediaGroup, media)
 	}
+
+	log.Printf("STEP 3\n")
 
 	if len(mediaGroup) > 0 {
 		group := tgbotapi.NewMediaGroup(chatID, mediaGroup)
@@ -293,10 +341,14 @@ func sendMaterial(bot *tgbotapi.BotAPI, chatID int64, db *database.DB) {
 		}
 	}
 
+	log.Printf("STEP 4\n")
+
 	if description != "" {
 		msg := tgbotapi.NewMessage(chatID, description)
 		if _, err := bot.Send(msg); err != nil {
 			log.Printf("Failed to send message to %v: %v\n", chatID, err)
 		}
 	}
+
+	log.Printf("STEP 5\n")
 }
