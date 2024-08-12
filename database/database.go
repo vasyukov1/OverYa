@@ -100,7 +100,12 @@ func (db *DB) GetSubscribers() map[int64]bool {
 	if err != nil {
 		log.Fatalf("Failed to query subscribers: %v", err)
 	}
-	defer rows.Close()
+	defer func(rows *sql.Rows) {
+		err := rows.Close()
+		if err != nil {
+
+		}
+	}(rows)
 
 	for rows.Next() {
 		var chatID int64
@@ -137,7 +142,6 @@ func (db *DB) AddMaterial(subjectName string, controlElement string, elementNumb
 		"INSERT INTO Materials (SubjectName, ControlElement, ElementNumber, FileIDs, Description) "+
 			"VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING",
 		subjectName, controlElement, elementNumber, pq.Array(fileIDs), description)
-	//log.Printf("fileIDs: %v\n", fileIDs[0])
 	return err
 }
 

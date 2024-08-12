@@ -269,7 +269,6 @@ func handleCallbackQuery(bot *tgbotapi.BotAPI, callbackQuery *tgbotapi.CallbackQ
 	}
 }
 
-// Функция для запроса медиа-файлов у администратора
 func promptForAttachments(bot *tgbotapi.BotAPI, chatID int64) {
 	msg := tgbotapi.NewMessage(chatID, "Attach media (photo, video, file) and send /ok when done.")
 	if _, err := bot.Send(msg); err != nil {
@@ -289,7 +288,6 @@ func sendBroadcast(bot *tgbotapi.BotAPI, chatID int64, db *database.DB, telegram
 	}
 }
 
-// Функция для обработки медиа-файлов
 func handleMediaAttachments(chatID int64, message *tgbotapi.Message) {
 	if message.Photo != nil && len(message.Photo) > 0 {
 		photo := tgbotapi.NewInputMediaPhoto(tgbotapi.FileID(message.Photo[len(message.Photo)-1].FileID))
@@ -314,8 +312,6 @@ func sendMaterial(bot *tgbotapi.BotAPI, chatID int64, db *database.DB) {
 		return
 	}
 
-	log.Printf("STEP 1\n")
-
 	if len(files) == 0 {
 		msg := tgbotapi.NewMessage(chatID, "There are not materials.")
 		if _, err := bot.Send(msg); err != nil {
@@ -324,15 +320,11 @@ func sendMaterial(bot *tgbotapi.BotAPI, chatID int64, db *database.DB) {
 		return
 	}
 
-	log.Printf("STEP 2\n")
-
 	var mediaGroup []interface{}
 	for _, fileID := range files {
 		media := tgbotapi.NewInputMediaPhoto(tgbotapi.FileID(fileID))
 		mediaGroup = append(mediaGroup, media)
 	}
-
-	log.Printf("STEP 3\n")
 
 	if len(mediaGroup) > 0 {
 		group := tgbotapi.NewMediaGroup(chatID, mediaGroup)
@@ -341,14 +333,10 @@ func sendMaterial(bot *tgbotapi.BotAPI, chatID int64, db *database.DB) {
 		}
 	}
 
-	log.Printf("STEP 4\n")
-
 	if description != "" {
 		msg := tgbotapi.NewMessage(chatID, description)
 		if _, err := bot.Send(msg); err != nil {
 			log.Printf("Failed to send message to %v: %v\n", chatID, err)
 		}
 	}
-
-	log.Printf("STEP 5\n")
 }
