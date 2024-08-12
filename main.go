@@ -12,8 +12,8 @@ import (
 var (
 	broadcastMsg      = make(map[int64]string)
 	description       = make(map[int64]string)
-	isBroadcastMode   = false
-	attachmentQueue   = []interface{}{}
+	isBroadcastMode   = make(map[int64]bool)
+	attachmentQueue   = make(map[int64][]interface{})
 	materialStep      = make(map[int64]string)
 	isDescriptionMode = make(map[int64]bool)
 )
@@ -25,7 +25,6 @@ func main() {
 	if err != nil {
 		log.Panic(err)
 	}
-
 	// We need to settle it: = false
 	bot.Debug = true
 	log.Printf("Authorized on account %s", bot.Self.UserName)
@@ -61,7 +60,7 @@ func main() {
 				db.AddSubscriber(chatID)
 			}
 
-			if chatID == adminMain && isBroadcastMode {
+			if chatID == adminMain && isBroadcastMode[chatID] {
 				handleAdminBroadcast(bot, update.Message, update, db)
 				continue
 			}
@@ -74,7 +73,7 @@ func main() {
 			case "broadcast":
 				if chatID == adminMain {
 					msg.Text = "Please enter the subject and control element, e.g., 'Algebra lecture 2'."
-					isBroadcastMode = true
+					isBroadcastMode[chatID] = true
 				} else {
 					msg.Text = "You are not an admin"
 				}
@@ -135,67 +134,37 @@ func main() {
 		}
 	}
 }
-
-func handleAdminBroadcast(bot *tgbotapi.BotAPI, message *tgbotapi.Message, callback tgbotapi.Update, db *database.DB) {
+func handleAdminBroadcast(bot *tgbotapi.BotAPI, message *tgbotapi.Message, update tgbotapi.Update, db *database.DB) {
 	chatID := message.Chat.ID
 
+	// Обработка сообщения с текстом, когда broadcastMsg пуст
 	if message.Text != "" && broadcastMsg[chatID] == "" {
 		broadcastMsg[chatID] = message.Text
-		msg := tgbotapi.NewMessage(chatID, "Attach media (photo, video, file) and send /ok when done.")
-		if _, err := bot.Send(msg); err != nil {
-			log.Printf("Failed to send message to %v: %v", chatID, err)
-		}
-	} else if message.Text == "/ok" {
-		var isDescriptionKeyboard = tgbotapi.NewInlineKeyboardMarkup(
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("Yes", "Yes"),
-				tgbotapi.NewInlineKeyboardButtonData("No", "/send"),
-			),
-		)
-		msg := tgbotapi.NewMessage(chatID, "Do you need description?")
-		msg.ReplyMarkup = isDescriptionKeyboard
-		if _, err := bot.Send(msg); err != nil {
-			log.Printf("Failed to send message to %v: %v", chatID, err)
-		}
-	} else if message.Text == "/send" {
-		isBroadcastMode = false
-		broadcast(bot, broadcastMsg[chatID], attachmentQueue, description[chatID], db)
-		description[chatID] = ""
-		broadcastMsg[chatID] = ""
-		attachmentQueue = []interface{}{}
-		msg := tgbotapi.NewMessage(chatID, "Broadcast sent to all subscribers.")
-		if _, err := bot.Send(msg); err != nil {
-			log.Printf("Failed to send message to %v: %v", chatID, err)
-		}
-	} else if callback.CallbackQuery != nil && callback.CallbackQuery.Data == "Yes" {
-		callback := tgbotapi.NewCallback(callback.CallbackQuery.ID, callback.CallbackQuery.Data)
-		if _, err := bot.Request(callback); err != nil {
-			log.Printf("Callback error: %v", err)
-		}
-		isDescriptionMode[chatID] = true
-		msg := tgbotapi.NewMessage(chatID, "Send the description")
-		if _, err := bot.Send(msg); err != nil {
-			log.Printf("Failed to send message to %v: %v", chatID, err)
-		}
-	} else if isDescriptionMode[chatID] {
-		description[chatID] = message.Text
-		isDescriptionMode[chatID] = false
-		msg := tgbotapi.NewMessage(chatID, "Tap /send")
-		if _, err := bot.Send(msg); err != nil {
-			log.Printf("Failed to send message to %v: %v", chatID, err)
-		}
-	} else if message.Photo != nil || message.Video != nil || message.Document != nil {
-		if message.Photo != nil {
-			photo := tgbotapi.NewInputMediaPhoto(tgbotapi.FileID(message.Photo[len(message.Photo)-1].FileID))
-			attachmentQueue = append(attachmentQueue, photo)
-		} else if message.Video != nil {
-			video := tgbotapi.NewInputMediaVideo(tgbotapi.FileID(message.Video.FileID))
-			attachmentQueue = append(attachmentQueue, video)
-		} else if message.Document != nil {
-			document := tgbotapi.NewInputMediaDocument(tgbotapi.FileID(message.Document.FileID))
-			attachmentQueue = append(attachmentQueue, document)
-		}
+		promptForAttachments(bot, chatID)
+		return
 	}
+	// Обработка команды "/ok"
+	if message.Text == "/ok" {
+		promptForDescription(bot, chatID)
+		return
+	}
+	// Обработка команды "/send"
+	if message.Text == "/send" {
+		sendBroadcast(bot, chatID, db)
+		return
+	}
+	// Обработка inline-кнопок для описания
+	if update.CallbackQuery != nil {
+		handleCallbackQuery(bot, update, chatID)
+		return
+	}
+	// Обработка текстовых сообщений для описания, если включен режим описания
+	if isDescriptionMode[chatID] {
+		handleDescriptionInput(bot, message, chatID)
+		return
+	}
+	// Обработка медиа-файлов
+	handleMediaAttachments(chatID, message)
 }
 
 func broadcast(bot *tgbotapi.BotAPI, message string, attachments []interface{}, description string, db *database.DB) {
@@ -250,30 +219,77 @@ func broadcast(bot *tgbotapi.BotAPI, message string, attachments []interface{}, 
 	}
 }
 
-func handleMediaAttachment(message *tgbotapi.Message, db *database.DB) {
-	//var media []interface{}
-	var fileID string
-
-	if message.Photo != nil {
-		fileID = message.Photo[len(message.Photo)-1].FileID
-		photo := tgbotapi.NewInputMediaPhoto(tgbotapi.FileID(fileID))
-		attachmentQueue = append(attachmentQueue, photo)
-	} else if message.Video != nil {
-		fileID = message.Video.FileID
-		video := tgbotapi.NewInputMediaVideo(tgbotapi.FileID(fileID))
-		attachmentQueue = append(attachmentQueue, video)
-	} else if message.Document != nil {
-		fileID = message.Document.FileID
-		document := tgbotapi.NewInputMediaDocument(tgbotapi.FileID(fileID))
-		attachmentQueue = append(attachmentQueue, document)
+// Функция для запроса медиа-файлов у администратора
+func promptForAttachments(bot *tgbotapi.BotAPI, chatID int64) {
+	msg := tgbotapi.NewMessage(chatID, "Attach media (photo, video, file) and send /ok when done.")
+	if _, err := bot.Send(msg); err != nil {
+		log.Printf("Failed to send message to %v: %v", chatID, err)
 	}
-	//if fileID != "" {
-	//	if err := db.AddMaterial(broadcastMsg, fileID); err == nil {
-	//		attachmentQueue = append(attachmentQueue, media)
-	//	} else {
-	//		log.Printf("Failed to add attachment to %v: %v\n", fileID, err)
-	//	}
-	//}
+}
+
+// Функция для запроса описания у администратора
+func promptForDescription(bot *tgbotapi.BotAPI, chatID int64) {
+	var descriptionKeyboard = tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("Yes", "Yes"),
+			tgbotapi.NewInlineKeyboardButtonData("No", "/send"),
+		),
+	)
+	msg := tgbotapi.NewMessage(chatID, "Do you need a description?")
+	msg.ReplyMarkup = descriptionKeyboard
+	if _, err := bot.Send(msg); err != nil {
+		log.Printf("Failed to send message to %v: %v", chatID, err)
+	}
+}
+
+// Функция для обработки текстового ввода описания
+func handleDescriptionInput(bot *tgbotapi.BotAPI, message *tgbotapi.Message, chatID int64) {
+	description[chatID] = message.Text
+	isDescriptionMode[chatID] = false
+	msg := tgbotapi.NewMessage(chatID, "Tap /send")
+	if _, err := bot.Send(msg); err != nil {
+		log.Printf("Failed to send message to %v: %v", chatID, err)
+	}
+}
+
+func handleCallbackQuery(bot *tgbotapi.BotAPI, update tgbotapi.Update, chatID int64) {
+	if update.CallbackQuery.Data == "Yes" {
+		callback := tgbotapi.NewCallback(update.CallbackQuery.ID, update.CallbackQuery.Data)
+		if _, err := bot.Request(callback); err != nil {
+			log.Printf("Callback error: %v", err)
+		}
+		isDescriptionMode[chatID] = true
+		msg := tgbotapi.NewMessage(chatID, "Send the description")
+		if _, err := bot.Send(msg); err != nil {
+			log.Printf("Failed to send message to %v: %v", chatID, err)
+		}
+	}
+}
+
+func sendBroadcast(bot *tgbotapi.BotAPI, chatID int64, db *database.DB) {
+	isBroadcastMode[chatID] = false
+	broadcast(bot, broadcastMsg[chatID], attachmentQueue[chatID], description[chatID], db)
+	description[chatID] = ""
+	broadcastMsg[chatID] = ""
+	attachmentQueue[chatID] = []interface{}{}
+	msg := tgbotapi.NewMessage(chatID, "Broadcast sent to all subscribers.")
+	if _, err := bot.Send(msg); err != nil {
+		log.Printf("Failed to send message to %v: %v", chatID, err)
+	}
+}
+
+// Функция для обработки медиа-файлов
+func handleMediaAttachments(chatID int64, message *tgbotapi.Message) {
+	if message.Photo != nil {
+		photo := tgbotapi.NewInputMediaPhoto(tgbotapi.FileID(message.Photo[len(message.Photo)-1].FileID))
+		attachmentQueue[chatID] = append(attachmentQueue[chatID], photo)
+	} else if message.Video != nil {
+		video := tgbotapi.NewInputMediaVideo(tgbotapi.FileID(message.Video.FileID))
+		attachmentQueue[chatID] = append(attachmentQueue[chatID], video)
+	} else if message.Document != nil {
+		document := tgbotapi.NewInputMediaDocument(tgbotapi.FileID(message.Document.FileID))
+		attachmentQueue[chatID] = append(attachmentQueue[chatID], document)
+	}
 }
 
 func sendMaterial(bot *tgbotapi.BotAPI, chatID int64, db *database.DB) {
