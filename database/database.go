@@ -59,11 +59,17 @@ func (db *DB) CreateTables() error {
 	    PRIMARY KEY (SubjectName, ControlElement, ElementNumber)
 	);`
 
+	createSubscriberRequest := `
+	CREATE TABLE IF NOT EXISTS SubscriberRequests (
+	    ID SERIAL PRIMARY KEY
+	)`
+
 	queries := []string{
 		createSubscribersTable,
 		createAdminsTable,
 		createSubjectsTable,
 		createMaterialsTable,
+		createSubscriberRequest,
 	}
 	for _, query := range queries {
 		_, err := db.Exec(query)
@@ -94,6 +100,41 @@ func (db *DB) AddSubscriber(chatID int64) {
 	}
 }
 
+// DeleteSubscriber Need checking
+func (db *DB) DeleteSubscriber(chatID int64) {
+	_, err := db.Exec("DELETE FROM Subscribers WHERE id=$1", chatID)
+	if err != nil {
+		log.Printf("Delete Subscribers error: %v", err)
+	}
+}
+
+// AddAdmin Need checking
+func (db *DB) AddAdmin(chatID int64) {
+	_, err := db.Exec("INSERT INTO Admins (ID) VALUES ($1) ON CONFLICT DO NOTHING", chatID)
+	if err != nil {
+		log.Printf("Add Subscribers error: %v", err)
+	}
+}
+
+// IsAdmin Need checking
+func (db *DB) IsAdmin(chatID int64) bool {
+	var exists bool
+	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM Admins WHERE id=$1)", chatID).Scan(&exists)
+	if err != nil {
+		log.Printf("Error checking subscriber existence: %v", err)
+		return false
+	}
+	return exists
+}
+
+// DeleteAdmin Need checking
+func (db *DB) DeleteAdmin(chatID int64) {
+	_, err := db.Exec("DELETE FROM Admins WHERE id=$1", chatID)
+	if err != nil {
+		log.Printf("Delete Admin error: %v", err)
+	}
+}
+
 func (db *DB) GetSubscribers() map[int64]bool {
 	subscribers := make(map[int64]bool)
 	rows, err := db.Query("SELECT ID FROM Subscribers")
@@ -103,7 +144,7 @@ func (db *DB) GetSubscribers() map[int64]bool {
 	defer func(rows *sql.Rows) {
 		err := rows.Close()
 		if err != nil {
-
+			log.Fatalf("Failed to close rows: %v", err)
 		}
 	}(rows)
 
@@ -120,6 +161,59 @@ func (db *DB) GetSubscribers() map[int64]bool {
 		log.Printf("Error iterating subscribers: %v", err)
 	}
 	return subscribers
+}
+
+// ----------------------- REQUEST ------------------------
+
+// GetSubscriberRequests NEED CHECKING
+func (db *DB) GetSubscriberRequests() ([]int64, error) {
+	var requests []int64
+	rows, err := db.Query("SELECT ID FROM SubscriberRequests")
+	if err != nil {
+		log.Fatalf("Failed to query subscriber request: %v", err)
+		return requests, err
+	}
+	defer func(rows *sql.Rows) {
+		err := rows.Close()
+		if err != nil {
+			log.Fatalf("Failed to close rows: %v", err)
+		}
+	}(rows)
+
+	for rows.Next() {
+		var chatID int64
+		if err := rows.Scan(&chatID); err != nil {
+			log.Printf("Failed to scan subscriber request ID %v: %s", chatID, err)
+			continue
+		}
+		requests = append(requests, chatID)
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Printf("Error iterating subscriber requests: %v", err)
+	}
+	return requests, nil
+}
+
+// CountSubscriberRequest NEED CHECKING
+func (db *DB) CountSubscriberRequest() int {
+	var count int
+	err := db.QueryRow("SELECT COUNT(*) FROM SubscriberRequests").Scan(&count)
+	if err != nil {
+		log.Printf("Failed to count subscriber requests: %v", err)
+		return 0
+	}
+	return count
+}
+
+func (db *DB) AddSubscriberRequest(chatID int64) error {
+	_, err := db.Exec("INSERT INTO SubscriberRequests (ID) VALUES ($1) ON CONFLICT DO NOTHING", chatID)
+	return err
+}
+
+func (db *DB) DeleteSubscriberRequest(chatID int64) error {
+	_, err := db.Exec("DELETE FROM SubscriberRequests WHERE id=$1", chatID)
+	return err
 }
 
 // ----------------------- SUBJECTS -----------------------
