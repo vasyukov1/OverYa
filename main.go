@@ -30,9 +30,6 @@ func main() {
 	bot.Debug = false
 	log.Printf("Authorized on account %s", bot.Self.UserName)
 
-	adminMain := cfg.AdminID
-	telegramChannel := cfg.TelegramChannel
-
 	db, err := database.NewDB()
 	if err != nil {
 		log.Fatalf("Error opening database: %v\n", err)
@@ -49,6 +46,10 @@ func main() {
 		log.Fatalf("Error creating tables: %v\n", err)
 	}
 
+	telegramChannel := cfg.TelegramChannel
+	adminMain := cfg.AdminID
+	db.AddAdmin(adminMain)
+
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
 	updates := bot.GetUpdatesChan(u)
@@ -57,10 +58,6 @@ func main() {
 		if update.Message != nil {
 			chatID := update.Message.Chat.ID
 			msg := tgbotapi.NewMessage(chatID, "")
-
-			//if !db.IsSubscriber(chatID) {
-			//	db.AddSubscriber(chatID)
-			//}
 
 			if !db.IsSubscriber(chatID) {
 				if !inProcess[chatID] {
@@ -103,7 +100,11 @@ func main() {
 						isDeleteSubscriberMode = true
 					}
 				case "requests":
-
+					if chatID == adminMain {
+						handleSubscriberRequests(bot, chatID, db)
+					} else {
+						msg.Text = "You are not an admin"
+					}
 				}
 
 				if update.Message.Command() == "" {
@@ -148,7 +149,13 @@ func main() {
 			}
 
 		} else if update.CallbackQuery != nil && db.IsSubscriber(update.CallbackQuery.From.ID) {
-			functions.HandleCallbackQuery(bot, update.CallbackQuery, db, telegramChannel, &isBroadcastMode)
+			if strings.HasPrefix(update.CallbackQuery.Data, "request_") ||
+				strings.HasPrefix(update.CallbackQuery.Data, "accept_") ||
+				strings.HasPrefix(update.CallbackQuery.Data, "reject_") {
+				handleRequestCallback(bot, update.CallbackQuery, db)
+			} else {
+				functions.HandleCallbackQuery(bot, update.CallbackQuery, db, telegramChannel, &isBroadcastMode)
+			}
 		}
 	}
 }
@@ -192,5 +199,109 @@ func handleSubscriberRequests(bot *tgbotapi.BotAPI, chatID int64, db *database.D
 	msg.ReplyMarkup = keyboard
 	if _, err := bot.Send(msg); err != nil {
 		log.Printf("Failed to send message to %v: %v", chatID, err)
+	}
+}
+
+func handleRequestCallback(bot *tgbotapi.BotAPI, callbackQuery *tgbotapi.CallbackQuery, db *database.DB) {
+	chatID := callbackQuery.Message.Chat.ID
+	data := callbackQuery.Data
+
+	if strings.HasPrefix(data, "request_") {
+		requestIDStr := strings.TrimPrefix(data, "request_")
+		requestID, err := strconv.ParseInt(requestIDStr, 10, 64)
+		if err != nil {
+			log.Printf("Failed to parse request ID: %v", err)
+			return
+		}
+
+		firstName := callbackQuery.Message.Chat.FirstName
+		lastName := callbackQuery.Message.Chat.LastName
+		userName := callbackQuery.Message.Chat.UserName
+		userInfo := fmt.Sprintf("%s %s", firstName, lastName)
+		if userName != "" {
+			userInfo = fmt.Sprintf("%s [@%s]", userInfo, userName)
+		}
+
+		msg := tgbotapi.NewMessage(chatID, ">>")
+		msg.Text = fmt.Sprintf("Would you like to accept request from ID: %d?\nInfo: %s", requestID, userInfo)
+
+		//msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("Would you like to accept request from ID: %d?", requestID))
+		button := tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("Принять", fmt.Sprintf("accept_%d", requestID)),
+				tgbotapi.NewInlineKeyboardButtonData("Отклонить", fmt.Sprintf("reject_%d", requestID)),
+			),
+		)
+		msg.ReplyMarkup = button
+		if _, err := bot.Send(msg); err != nil {
+			log.Printf("Failed to send message to %v: %v", chatID, err)
+		}
+	}
+
+	var requestID int64
+	var err error
+
+	if strings.HasPrefix(data, "accept_") {
+		requestIDStr := strings.TrimPrefix(data, "accept_")
+		requestID, err = strconv.ParseInt(requestIDStr, 10, 64)
+		if err != nil {
+			log.Printf("Failed to parse request ID: %v", err)
+			return
+		}
+		db.AddSubscriber(requestID)
+		msg := tgbotapi.NewMessage(requestID, "Ваша заявка принята, теперь вы подписчик!")
+		msgAdmin := tgbotapi.NewMessage(chatID, fmt.Sprintf("Заявка от %d принята.", requestID))
+		if _, err := bot.Send(msgAdmin); err != nil {
+			log.Printf("Failed to send message to %v: %v", chatID, err)
+		}
+		if _, err := bot.Send(msg); err != nil {
+			log.Printf("Failed to send message to %v: %v", requestID, err)
+		}
+	} else if strings.HasPrefix(data, "reject_") {
+		requestIDStr := strings.TrimPrefix(data, "reject_")
+		requestID, err = strconv.ParseInt(requestIDStr, 10, 64)
+		if err != nil {
+			log.Printf("Failed to parse request ID: %v", err)
+			return
+		}
+		msg := tgbotapi.NewMessage(requestID, "Ваша заявка отклонена.")
+		msgAdmin := tgbotapi.NewMessage(chatID, fmt.Sprintf("Заявка от %d отклонена.", requestID))
+		if _, err := bot.Send(msgAdmin); err != nil {
+			log.Printf("Failed to send message to %v: %v", chatID, err)
+		}
+		if _, err := bot.Send(msg); err != nil {
+			log.Printf("Failed to send message to %v: %v", requestID, err)
+		}
+	}
+	if errDB := db.DeleteSubscriberRequest(requestID); errDB != nil {
+		log.Printf("Failed to delete subscriber request: %v", err)
+	}
+	editRequestList(bot, callbackQuery.Message, db)
+	inProcess[requestID] = false
+}
+
+func editRequestList(bot *tgbotapi.BotAPI, message *tgbotapi.Message, db *database.DB) {
+	requests, err := db.GetSubscriberRequests()
+	if err != nil {
+		log.Printf("Failed to get subscriber requests: %v", err)
+		return
+	}
+	if len(requests) == 0 {
+		editMsg := tgbotapi.NewEditMessageText(message.Chat.ID, message.MessageID, "Заявок нет.")
+		if _, err := bot.Send(editMsg); err != nil {
+			log.Printf("Failed to edit message: %v", err)
+		}
+		return
+	}
+	buttons := make([]tgbotapi.InlineKeyboardButton, 0, len(requests))
+	for _, request := range requests {
+		button := tgbotapi.NewInlineKeyboardButtonData(
+			fmt.Sprintf(strconv.Itoa(int(request))), fmt.Sprintf("request_%d", request))
+		buttons = append(buttons, button)
+	}
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons)
+	editMsg := tgbotapi.NewEditMessageReplyMarkup(message.Chat.ID, message.MessageID, keyboard)
+	if _, err := bot.Send(editMsg); err != nil {
+		log.Printf("Failed to edit message: %v", err)
 	}
 }
