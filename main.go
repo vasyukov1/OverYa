@@ -49,6 +49,7 @@ func main() {
 	telegramChannel := cfg.TelegramChannel
 	adminMain := cfg.AdminID
 	db.AddAdmin(adminMain)
+	db.AddSubscriber(adminMain)
 
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
@@ -66,7 +67,7 @@ func main() {
 					case "become_subscriber":
 						msg.Text = "Your request is processed"
 						inProcess[chatID] = true
-						users.SendSubscribeRequest(bot, chatID, adminMain, db)
+						users.SendSubscribeRequest(bot, chatID, adminMain, db, update.Message.Chat)
 					}
 				} else {
 					msg.Text = "Your request is processed"
@@ -134,18 +135,23 @@ func main() {
 						deleteID, err := strconv.Atoi(strings.TrimSpace(update.Message.Text))
 						if err != nil {
 							log.Printf("Error converting delete_subscriber_id to int: %v\n", err)
-							msg.Text = "We can't delete this subscriber"
+							msg.Text = "There isn't this subscriber"
 						} else {
-							users.DeleteSubscriber(bot, int64(deleteID), adminMain, db)
-							msg.Text = "Deleting..."
+							if users.DeleteSubscriber(bot, int64(deleteID), adminMain, db) {
+								isDeleteSubscriberMode = false
+							} else {
+								msg.Text = "We can't delete this subscriber"
+							}
 						}
 
 					}
 				}
 			}
 
-			if _, err := bot.Send(msg); err != nil {
-				log.Printf("Send message error to %v: %v", chatID, err)
+			if msg.Text != "" {
+				if _, err := bot.Send(msg); err != nil {
+					log.Printf("Send message error to %v: %v", chatID, err)
+				}
 			}
 
 		} else if update.CallbackQuery != nil && db.IsSubscriber(update.CallbackQuery.From.ID) {
@@ -187,15 +193,15 @@ func handleSubscriberRequests(bot *tgbotapi.BotAPI, chatID int64, db *database.D
 		return
 	}
 
-	buttons := make([]tgbotapi.InlineKeyboardButton, 0, len(requests))
+	var rows [][]tgbotapi.InlineKeyboardButton
 	for _, request := range requests {
 		button := tgbotapi.NewInlineKeyboardButtonData(
-			fmt.Sprintf(strconv.Itoa(int(request))), fmt.Sprintf("request_%d", request))
-		buttons = append(buttons, button)
+			fmt.Sprintf("%d", request), fmt.Sprintf("request_%d", request))
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(button))
 	}
 
 	msg := tgbotapi.NewMessage(chatID, "Subscriber Requests:")
-	keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons)
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(rows...)
 	msg.ReplyMarkup = keyboard
 	if _, err := bot.Send(msg); err != nil {
 		log.Printf("Failed to send message to %v: %v", chatID, err)
@@ -214,18 +220,15 @@ func handleRequestCallback(bot *tgbotapi.BotAPI, callbackQuery *tgbotapi.Callbac
 			return
 		}
 
-		firstName := callbackQuery.Message.Chat.FirstName
-		lastName := callbackQuery.Message.Chat.LastName
-		userName := callbackQuery.Message.Chat.UserName
-		userInfo := fmt.Sprintf("%s %s", firstName, lastName)
-		if userName != "" {
-			userInfo = fmt.Sprintf("%s [@%s]", userInfo, userName)
+		userInfo, err := db.GetSubscriberRequestInfo(requestID)
+		if err != nil {
+			log.Printf("Failed to get subscriber request info: %v", err)
+			return
 		}
 
-		msg := tgbotapi.NewMessage(chatID, ">>")
+		msg := tgbotapi.NewMessage(chatID, "")
 		msg.Text = fmt.Sprintf("Would you like to accept request from ID: %d?\nInfo: %s", requestID, userInfo)
 
-		//msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("Would you like to accept request from ID: %d?", requestID))
 		button := tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData("Принять", fmt.Sprintf("accept_%d", requestID)),
@@ -293,13 +296,38 @@ func editRequestList(bot *tgbotapi.BotAPI, message *tgbotapi.Message, db *databa
 		}
 		return
 	}
-	buttons := make([]tgbotapi.InlineKeyboardButton, 0, len(requests))
+
+	var rows [][]tgbotapi.InlineKeyboardButton
 	for _, request := range requests {
 		button := tgbotapi.NewInlineKeyboardButtonData(
-			fmt.Sprintf(strconv.Itoa(int(request))), fmt.Sprintf("request_%d", request))
-		buttons = append(buttons, button)
+			fmt.Sprintf("%d", request), fmt.Sprintf("request_%d", request))
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(button))
 	}
-	keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons)
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(rows...)
+	if message.ReplyMarkup != nil && message.ReplyMarkup.InlineKeyboard != nil {
+		if len(message.ReplyMarkup.InlineKeyboard) == len(keyboard.InlineKeyboard) {
+			same := true
+			for i, row := range message.ReplyMarkup.InlineKeyboard {
+				if len(row) != len(keyboard.InlineKeyboard[i]) {
+					same = false
+					break
+				}
+				for j, button := range row {
+					if button.Text != keyboard.InlineKeyboard[i][j].Text || button.CallbackData == nil || *button.CallbackData != *keyboard.InlineKeyboard[i][j].CallbackData {
+						same = false
+						break
+					}
+				}
+				if !same {
+					break
+				}
+			}
+			if same {
+				return
+			}
+		}
+	}
+
 	editMsg := tgbotapi.NewEditMessageReplyMarkup(message.Chat.ID, message.MessageID, keyboard)
 	if _, err := bot.Send(editMsg); err != nil {
 		log.Printf("Failed to edit message: %v", err)
