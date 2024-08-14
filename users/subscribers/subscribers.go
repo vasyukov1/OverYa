@@ -1,4 +1,4 @@
-package users
+package subscribers
 
 import (
 	"fmt"
@@ -37,8 +37,13 @@ func DeleteSubscriber(bot *tgbotapi.BotAPI, chatID int64, mainAdmin int64, db *d
 		bot.Send(msg)
 		return false
 	}
+	if db.IsAdmin(chatID) {
+		db.DeleteAdmin(chatID)
+		msg := tgbotapi.NewMessage(chatID, "*You aren't now an admin*")
+		bot.Send(msg)
+	}
 	db.DeleteSubscriber(chatID)
-	msg := tgbotapi.NewMessage(chatID, "**You aren't now a subscriber(**")
+	msg := tgbotapi.NewMessage(chatID, "*You aren't now a subscriber(*")
 	bot.Send(msg)
 	return true
 }

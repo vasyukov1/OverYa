@@ -67,12 +67,21 @@ func (db *DB) CreateTables() error {
 	    user_name TEXT
 	);`
 
+	createAdminRequestsTable := `
+	CREATE TABLE IF NOT EXISTS admin_requests (
+	    id SERIAL PRIMARY KEY,
+	    first_name TEXT,
+	    last_name TEXT,
+	    user_name TEXT
+	);`
+
 	queries := []string{
 		createSubscribersTable,
 		createAdminsTable,
 		createSubjectsTable,
 		createMaterialsTable,
 		createSubscriberRequestsTable,
+		createAdminRequestsTable,
 	}
 	for _, query := range queries {
 		_, err := db.Exec(query)
@@ -166,9 +175,8 @@ func (db *DB) GetSubscribers() map[int64]bool {
 	return subscribers
 }
 
-// ----------------------- REQUEST ------------------------
+// ----------------------- SUBSCRIBER REQUEST ------------------------
 
-// GetSubscriberRequests NEED CHECKING
 func (db *DB) GetSubscriberRequests() ([]int64, error) {
 	var requests []int64
 	rows, err := db.Query("SELECT ID FROM subscriber_requests")
@@ -212,7 +220,6 @@ func (db *DB) GetSubscriberRequestInfo(requestID int64) (string, error) {
 	return userInfo, nil
 }
 
-// CountSubscriberRequest NEED CHECKING
 func (db *DB) CountSubscriberRequest() int {
 	var count int
 	err := db.QueryRow("SELECT COUNT(*) FROM subscriber_requests").Scan(&count)
@@ -239,6 +246,79 @@ func (db *DB) AddSubscriberRequest(chatID int64, firstName, lastName, userName s
 
 func (db *DB) DeleteSubscriberRequest(chatID int64) error {
 	_, err := db.Exec("DELETE FROM subscriber_requests WHERE id=$1", chatID)
+	return err
+}
+
+// ----------------------- ADMIN REQUEST ------------------------
+
+func (db *DB) GetAdminRequests() ([]int64, error) {
+	var requests []int64
+	rows, err := db.Query("SELECT ID FROM admin_requests")
+	if err != nil {
+		log.Fatalf("Failed to query admin request: %v", err)
+		return requests, err
+	}
+	defer func(rows *sql.Rows) {
+		err := rows.Close()
+		if err != nil {
+			log.Fatalf("Failed to close rows: %v", err)
+		}
+	}(rows)
+
+	for rows.Next() {
+		var chatID int64
+		if err := rows.Scan(&chatID); err != nil {
+			log.Printf("Failed to scan admin request ID %v: %s", chatID, err)
+			continue
+		}
+		requests = append(requests, chatID)
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Printf("Error iterating admin requests: %v", err)
+	}
+	return requests, nil
+}
+
+func (db *DB) GetAdminRequestInfo(requestID int64) (string, error) {
+	var firstName, lastName, userName string
+	query := `SELECT first_name, last_name, user_name FROM admin_requests WHERE id = $1`
+	err := db.QueryRow(query, requestID).Scan(&firstName, &lastName, &userName)
+	if err != nil {
+		return "", err
+	}
+	userInfo := fmt.Sprintf("%s %s", firstName, lastName)
+	if userName != "" {
+		userInfo = fmt.Sprintf("%s [@%s]", userInfo, userName)
+	}
+	return userInfo, nil
+}
+
+func (db *DB) CountAdminRequest() int {
+	var count int
+	err := db.QueryRow("SELECT COUNT(*) FROM admin_requests").Scan(&count)
+	if err != nil {
+		log.Printf("Failed to count admin requests: %v", err)
+		return 0
+	}
+	return count
+}
+
+func (db *DB) AddAdminRequest(chatID int64, firstName, lastName, userName string) error {
+	_, err := db.Exec(`
+		INSERT INTO admin_requests (id, first_name, last_name, user_name)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (id) 
+		DO UPDATE SET 
+			first_name = EXCLUDED.first_name,
+			last_name = EXCLUDED.last_name,
+			user_name = EXCLUDED.user_name
+	`, chatID, firstName, lastName, userName)
+	return err
+}
+
+func (db *DB) DeleteAdminRequest(chatID int64) error {
+	_, err := db.Exec("DELETE FROM admin_requests WHERE id=$1", chatID)
 	return err
 }
 

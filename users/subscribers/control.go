@@ -1,4 +1,4 @@
-package users
+package subscribers
 
 import (
 	"fmt"
@@ -39,7 +39,7 @@ func HandleSubscriberRequests(bot *tgbotapi.BotAPI, chatID int64, db *database.D
 	var rows [][]tgbotapi.InlineKeyboardButton
 	for _, request := range requests {
 		button := tgbotapi.NewInlineKeyboardButtonData(
-			fmt.Sprintf("%d", request), fmt.Sprintf("request_%d", request))
+			fmt.Sprintf("%d", request), fmt.Sprintf("request_subscriber_%d", request))
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(button))
 	}
 
@@ -51,12 +51,12 @@ func HandleSubscriberRequests(bot *tgbotapi.BotAPI, chatID int64, db *database.D
 	}
 }
 
-func HandleRequestCallback(bot *tgbotapi.BotAPI, callbackQuery *tgbotapi.CallbackQuery, db *database.DB, inProcess *map[int64]bool) {
+func HandleRequestCallback(bot *tgbotapi.BotAPI, callbackQuery *tgbotapi.CallbackQuery, db *database.DB, inProcessSubReq *map[int64]bool) {
 	chatID := callbackQuery.Message.Chat.ID
 	data := callbackQuery.Data
 
-	if strings.HasPrefix(data, "request_") {
-		requestIDStr := strings.TrimPrefix(data, "request_")
+	if strings.HasPrefix(data, "request_subscriber_") {
+		requestIDStr := strings.TrimPrefix(data, "request_subscriber_")
 		requestID, err := strconv.ParseInt(requestIDStr, 10, 64)
 		if err != nil {
 			log.Printf("Failed to parse request ID: %v", err)
@@ -74,8 +74,8 @@ func HandleRequestCallback(bot *tgbotapi.BotAPI, callbackQuery *tgbotapi.Callbac
 
 		button := tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("Принять", fmt.Sprintf("accept_%d", requestID)),
-				tgbotapi.NewInlineKeyboardButtonData("Отклонить", fmt.Sprintf("reject_%d", requestID)),
+				tgbotapi.NewInlineKeyboardButtonData("Принять", fmt.Sprintf("accept_subscriber_%d", requestID)),
+				tgbotapi.NewInlineKeyboardButtonData("Отклонить", fmt.Sprintf("reject_subscriber_%d", requestID)),
 			),
 		)
 		msg.ReplyMarkup = button
@@ -87,8 +87,8 @@ func HandleRequestCallback(bot *tgbotapi.BotAPI, callbackQuery *tgbotapi.Callbac
 	var requestID int64
 	var err error
 
-	if strings.HasPrefix(data, "accept_") {
-		requestIDStr := strings.TrimPrefix(data, "accept_")
+	if strings.HasPrefix(data, "accept_subscriber_") {
+		requestIDStr := strings.TrimPrefix(data, "accept_subscriber_")
 		requestID, err = strconv.ParseInt(requestIDStr, 10, 64)
 		if err != nil {
 			log.Printf("Failed to parse request ID: %v", err)
@@ -103,8 +103,8 @@ func HandleRequestCallback(bot *tgbotapi.BotAPI, callbackQuery *tgbotapi.Callbac
 		if _, err := bot.Send(msg); err != nil {
 			log.Printf("Failed to send message to %v: %v", requestID, err)
 		}
-	} else if strings.HasPrefix(data, "reject_") {
-		requestIDStr := strings.TrimPrefix(data, "reject_")
+	} else if strings.HasPrefix(data, "reject_subscriber_") {
+		requestIDStr := strings.TrimPrefix(data, "reject_subscriber_")
 		requestID, err = strconv.ParseInt(requestIDStr, 10, 64)
 		if err != nil {
 			log.Printf("Failed to parse request ID: %v", err)
@@ -123,7 +123,7 @@ func HandleRequestCallback(bot *tgbotapi.BotAPI, callbackQuery *tgbotapi.Callbac
 		log.Printf("Failed to delete subscriber request: %v", err)
 	}
 	editRequestList(bot, callbackQuery.Message, db)
-	(*inProcess)[requestID] = false
+	(*inProcessSubReq)[requestID] = false
 }
 
 func editRequestList(bot *tgbotapi.BotAPI, message *tgbotapi.Message, db *database.DB) {
@@ -143,7 +143,7 @@ func editRequestList(bot *tgbotapi.BotAPI, message *tgbotapi.Message, db *databa
 	var rows [][]tgbotapi.InlineKeyboardButton
 	for _, request := range requests {
 		button := tgbotapi.NewInlineKeyboardButtonData(
-			fmt.Sprintf("%d", request), fmt.Sprintf("request_%d", request))
+			fmt.Sprintf("%d", request), fmt.Sprintf("request_subscriber_%d", request))
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(button))
 	}
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(rows...)
