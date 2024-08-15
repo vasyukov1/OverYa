@@ -7,6 +7,7 @@ import (
 	"github.com/lib/pq"
 	_ "github.com/lib/pq"
 	"log"
+	"slices"
 )
 
 const (
@@ -38,10 +39,20 @@ func (db *DB) CreateTables() error {
         ID SERIAL PRIMARY KEY
     );`
 
-	createAdminsTable := `
-	CREATE TABLE IF NOT EXISTS Admins (
+	createSubscriberRequestsTable := `
+	CREATE TABLE IF NOT EXISTS subscriber_requests (
 	    ID SERIAL PRIMARY KEY,
-	    count_of_posts INT NOT NULL DEFAULT 0
+	    first_name TEXT,
+	    last_name TEXT,
+	    user_name TEXT
+	);`
+
+	createAdminsTable := `
+	CREATE TABLE IF NOT EXISTS admins (
+	    ID SERIAL PRIMARY KEY,
+	    first_name TEXT,
+	    last_name TEXT,
+	    user_name TEXT
 	);`
 
 	createSubjectsTable := `
@@ -59,17 +70,9 @@ func (db *DB) CreateTables() error {
 	    PRIMARY KEY (SubjectName, ControlElement, ElementNumber)
 	);`
 
-	createSubscriberRequestsTable := `
-	CREATE TABLE IF NOT EXISTS subscriber_requests (
-	    id SERIAL PRIMARY KEY,
-	    first_name TEXT,
-	    last_name TEXT,
-	    user_name TEXT
-	);`
-
 	createAdminRequestsTable := `
 	CREATE TABLE IF NOT EXISTS admin_requests (
-	    id SERIAL PRIMARY KEY,
+	    ID SERIAL PRIMARY KEY,
 	    first_name TEXT,
 	    last_name TEXT,
 	    user_name TEXT
@@ -93,299 +96,121 @@ func (db *DB) CreateTables() error {
 	return nil
 }
 
-// ----------------------- USERS -----------------------
+// -------------------- SUBJECTS --------------------
 
-func (db *DB) IsSubscriber(chatID int64) bool {
-	var exists bool
-	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM Subscribers WHERE id=$1)", chatID).Scan(&exists)
-	if err != nil {
-		log.Printf("Error checking subscriber existence: %v", err)
-		return false
-	}
-	return exists
-}
+func (db *DB) GetSubjects() []string {
 
-func (db *DB) AddSubscriber(chatID int64) {
-	_, err := db.Exec("INSERT INTO Subscribers (ID) VALUES ($1) ON CONFLICT DO NOTHING", chatID)
+	var subjects []string
+	rows, err := db.Query("SELECT Name FROM Subjects")
 	if err != nil {
-		log.Printf("Add Subscribers error: %v", err)
-	}
-}
-
-// DeleteSubscriber Need checking
-func (db *DB) DeleteSubscriber(chatID int64) {
-	_, err := db.Exec("DELETE FROM Subscribers WHERE id=$1", chatID)
-	if err != nil {
-		log.Printf("Delete Subscribers error: %v", err)
-	}
-}
-
-// AddAdmin Need checking
-func (db *DB) AddAdmin(chatID int64) {
-	_, err := db.Exec("INSERT INTO Admins (ID) VALUES ($1) ON CONFLICT DO NOTHING", chatID)
-	if err != nil {
-		log.Printf("Add Subscribers error: %v", err)
-	}
-}
-
-// IsAdmin Need checking
-func (db *DB) IsAdmin(chatID int64) bool {
-	var exists bool
-	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM Admins WHERE id=$1)", chatID).Scan(&exists)
-	if err != nil {
-		log.Printf("Error checking subscriber existence: %v", err)
-		return false
-	}
-	return exists
-}
-
-// DeleteAdmin Need checking
-func (db *DB) DeleteAdmin(chatID int64) {
-	_, err := db.Exec("DELETE FROM Admins WHERE id=$1", chatID)
-	if err != nil {
-		log.Printf("Delete Admin error: %v", err)
-	}
-}
-
-func (db *DB) GetSubscribers() map[int64]bool {
-	subscribers := make(map[int64]bool)
-	rows, err := db.Query("SELECT ID FROM Subscribers")
-	if err != nil {
-		log.Fatalf("Failed to query subscribers: %v", err)
+		log.Printf("Failed to query subjects request: %v", err)
+		return nil
 	}
 	defer func(rows *sql.Rows) {
-		err := rows.Close()
+		err = rows.Close()
 		if err != nil {
 			log.Fatalf("Failed to close rows: %v", err)
 		}
 	}(rows)
-
 	for rows.Next() {
-		var chatID int64
-		if err := rows.Scan(&chatID); err != nil {
-			log.Printf("Failed to scan subscriber ID %v: %s", chatID, err)
-			continue
+		var subject string
+		if err = rows.Scan(&subject); err != nil {
+			log.Printf("Failed to scan subject: %v", err)
 		}
-		subscribers[chatID] = true
+		subjects = append(subjects, subject)
 	}
 
-	if err := rows.Err(); err != nil {
-		log.Printf("Error iterating subscribers: %v", err)
+	if err = rows.Err(); err != nil {
+		log.Printf("Error iterating subjects requests: %v", err)
 	}
-	return subscribers
+	return subjects
 }
 
-// ----------------------- SUBSCRIBER REQUEST ------------------------
-
-func (db *DB) GetSubscriberRequests() ([]int64, error) {
-	var requests []int64
-	rows, err := db.Query("SELECT ID FROM subscriber_requests")
+func (db *DB) GetControlElements(subject string) []string {
+	query := `
+		SELECT DISTINCT ControlElement 
+		FROM Materials 
+		WHERE SubjectName = $1
+	`
+	rows, err := db.Query(query, subject)
 	if err != nil {
-		log.Fatalf("Failed to query subscriber request: %v", err)
-		return requests, err
+		log.Printf("Error querying control elements: %v\n", err)
+		return nil
 	}
 	defer func(rows *sql.Rows) {
 		err := rows.Close()
 		if err != nil {
-			log.Fatalf("Failed to close rows: %v", err)
+
 		}
 	}(rows)
 
+	var controlElements []string
 	for rows.Next() {
-		var chatID int64
-		if err := rows.Scan(&chatID); err != nil {
-			log.Printf("Failed to scan subscriber request ID %v: %s", chatID, err)
+		var controlElement string
+		if err = rows.Scan(&controlElement); err != nil {
+			log.Printf("Error scanning control element: %v\n", err)
 			continue
 		}
-		requests = append(requests, chatID)
+		if !slices.Contains(controlElements, controlElement) {
+			controlElements = append(controlElements, controlElement)
+		}
 	}
 
 	if err := rows.Err(); err != nil {
-		log.Printf("Error iterating subscriber requests: %v", err)
+		log.Printf("Error in control element rows iteration: %v\n", err)
 	}
-	return requests, nil
+
+	return controlElements
 }
 
-func (db *DB) GetSubscriberRequestInfo(requestID int64) (string, error) {
-	var firstName, lastName, userName string
-	query := `SELECT first_name, last_name, user_name FROM subscriber_requests WHERE id = $1`
-	err := db.QueryRow(query, requestID).Scan(&firstName, &lastName, &userName)
+func (db *DB) GetElementNumber(subject string, controlElement string) []int {
+	query := `
+		SELECT DISTINCT ElementNumber 
+		FROM Materials 
+		WHERE SubjectName = $1 AND ControlElement = $2
+	`
+	rows, err := db.Query(query, subject, controlElement)
 	if err != nil {
-		return "", err
-	}
-	userInfo := fmt.Sprintf("%s %s", firstName, lastName)
-	if userName != "" {
-		userInfo = fmt.Sprintf("%s [@%s]", userInfo, userName)
-	}
-	return userInfo, nil
-}
-
-func (db *DB) CountSubscriberRequest() int {
-	var count int
-	err := db.QueryRow("SELECT COUNT(*) FROM subscriber_requests").Scan(&count)
-	if err != nil {
-		log.Printf("Failed to count subscriber requests: %v", err)
-		return 0
-	}
-	return count
-}
-
-func (db *DB) AddSubscriberRequest(chatID int64, firstName, lastName, userName string) error {
-	//_, err := db.Exec("INSERT INTO SubscriberRequests (ID) VALUES ($1) ON CONFLICT DO NOTHING", chatID)
-	_, err := db.Exec(`
-		INSERT INTO subscriber_requests (id, first_name, last_name, user_name)
-		VALUES ($1, $2, $3, $4)
-		ON CONFLICT (id) 
-		DO UPDATE SET 
-			first_name = EXCLUDED.first_name,
-			last_name = EXCLUDED.last_name,
-			user_name = EXCLUDED.user_name
-	`, chatID, firstName, lastName, userName)
-	return err
-}
-
-func (db *DB) DeleteSubscriberRequest(chatID int64) error {
-	_, err := db.Exec("DELETE FROM subscriber_requests WHERE id=$1", chatID)
-	return err
-}
-
-// ----------------------- ADMIN REQUEST ------------------------
-
-func (db *DB) GetAdminRequests() ([]int64, error) {
-	var requests []int64
-	rows, err := db.Query("SELECT ID FROM admin_requests")
-	if err != nil {
-		log.Fatalf("Failed to query admin request: %v", err)
-		return requests, err
+		log.Printf("Error querying element number: %v\n", err)
+		return nil
 	}
 	defer func(rows *sql.Rows) {
 		err := rows.Close()
 		if err != nil {
-			log.Fatalf("Failed to close rows: %v", err)
+
 		}
 	}(rows)
 
+	var numbers []int
 	for rows.Next() {
-		var chatID int64
-		if err := rows.Scan(&chatID); err != nil {
-			log.Printf("Failed to scan admin request ID %v: %s", chatID, err)
+		var number int
+		if err = rows.Scan(&number); err != nil {
+			log.Printf("Error scanning element number: %v\n", err)
 			continue
 		}
-		requests = append(requests, chatID)
+		numbers = append(numbers, number)
+
 	}
 
 	if err := rows.Err(); err != nil {
-		log.Printf("Error iterating admin requests: %v", err)
+		log.Printf("Error in element number rows iteration: %v\n", err)
 	}
-	return requests, nil
+
+	return numbers
 }
 
-func (db *DB) GetAdminRequestInfo(requestID int64) (string, error) {
-	var firstName, lastName, userName string
-	query := `SELECT first_name, last_name, user_name FROM admin_requests WHERE id = $1`
-	err := db.QueryRow(query, requestID).Scan(&firstName, &lastName, &userName)
-	if err != nil {
-		return "", err
-	}
-	userInfo := fmt.Sprintf("%s %s", firstName, lastName)
-	if userName != "" {
-		userInfo = fmt.Sprintf("%s [@%s]", userInfo, userName)
-	}
-	return userInfo, nil
-}
-
-func (db *DB) CountAdminRequest() int {
-	var count int
-	err := db.QueryRow("SELECT COUNT(*) FROM admin_requests").Scan(&count)
-	if err != nil {
-		log.Printf("Failed to count admin requests: %v", err)
-		return 0
-	}
-	return count
-}
-
-func (db *DB) AddAdminRequest(chatID int64, firstName, lastName, userName string) error {
-	_, err := db.Exec(`
-		INSERT INTO admin_requests (id, first_name, last_name, user_name)
-		VALUES ($1, $2, $3, $4)
-		ON CONFLICT (id) 
-		DO UPDATE SET 
-			first_name = EXCLUDED.first_name,
-			last_name = EXCLUDED.last_name,
-			user_name = EXCLUDED.user_name
-	`, chatID, firstName, lastName, userName)
-	return err
-}
-
-func (db *DB) DeleteAdminRequest(chatID int64) error {
-	_, err := db.Exec("DELETE FROM admin_requests WHERE id=$1", chatID)
-	return err
-}
-
-// ----------------------- SUBJECTS -----------------------
-
-func (db *DB) SubjectExists(subjectName string) (bool, error) {
-	var exists bool
-	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM Subjects WHERE Name=$1)", subjectName).Scan(&exists)
-	return exists, err
-}
-
-func (db *DB) AddSubject(subjectName string) error {
-	_, err := db.Exec("INSERT INTO Subjects (Name) VALUES ($1) ON CONFLICT DO NOTHING", subjectName)
-	return err
-}
-
-// ----------------------- MATERIALS -----------------------
-
-func (db *DB) AddMaterial(subjectName string, controlElement string, elementNumber int, fileIDs []string, description string) error {
-	_, err := db.Exec(
-		"INSERT INTO Materials (SubjectName, ControlElement, ElementNumber, FileIDs, Description) "+
-			"VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING",
-		subjectName, controlElement, elementNumber, pq.Array(fileIDs), description)
-	return err
-}
-
-func (db *DB) GetMaterial(chatID int64) ([]string, string, error) {
+func (db *DB) GetMaterial(subject string, controlElement string, elementNumber int) ([]string, string, error) {
 	var fileIDs []string
 	var description string
-	err := db.QueryRow(
-		"SELECT FileIDs, Description FROM Materials WHERE SubjectName = $1 AND ControlElement = $2 AND ElementNumber = $3",
-		tempSubject[chatID], tempControlElement[chatID], tempElementNumber[chatID]).Scan(pq.Array(&fileIDs), &description)
+
+	query := `SELECT FileIDs, Description FROM Materials WHERE SubjectName = $1 AND ControlElement = $2 AND ElementNumber = $3`
+	err := db.QueryRow(query, subject, controlElement, elementNumber).Scan(pq.Array(&fileIDs), &description)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, "", nil
+			return nil, "", err
 		}
 		return nil, "", err
 	}
+
 	return fileIDs, description, nil
-}
-
-// ----------------------- TEMP STORAGE -----------------------
-
-var tempSubject = make(map[int64]string)
-var tempControlElement = make(map[int64]string)
-var tempElementNumber = make(map[int64]int)
-
-func (db *DB) SetTempSubject(chatID int64, subject string) {
-	tempSubject[chatID] = subject
-}
-
-func (db *DB) SetTempControlElement(chatID int64, controlElement string) {
-	tempControlElement[chatID] = controlElement
-}
-
-func (db *DB) SetTempElementNumber(chatID int64, elementNumber int) {
-	tempElementNumber[chatID] = elementNumber
-}
-
-func (db *DB) GetTempSubject(chatID int64) string {
-	return tempSubject[chatID]
-}
-
-func (db *DB) GetTempControlElement(chatID int64) string {
-	return tempControlElement[chatID]
-}
-
-func (db *DB) GetTempElementNUmber(chatID int64) int {
-	return tempElementNumber[chatID]
 }

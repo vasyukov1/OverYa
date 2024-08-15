@@ -9,6 +9,47 @@ import (
 	"strings"
 )
 
+func AddSubscriber(bot *tgbotapi.BotAPI, chatID int64, db *database.DB) {
+	db.AddSubscriber(chatID)
+	log.Printf("Added subscriber %v", chatID)
+	msg := tgbotapi.NewMessage(chatID, "You are now a subscriber!")
+	bot.Send(msg)
+}
+
+func SendSubscribeRequest(bot *tgbotapi.BotAPI, chatID int64, mainAdmin int64, db *database.DB, chat *tgbotapi.Chat) {
+	firstName := chat.FirstName
+	lastName := chat.LastName
+	userName := chat.UserName
+	if err := db.AddSubscriberRequest(chatID, firstName, lastName, userName); err != nil {
+		log.Printf("Send subscribe request error: %v", err)
+		msg := tgbotapi.NewMessage(chatID, "We have problem with your request, sorry")
+		bot.Send(msg)
+	} else {
+		msg := tgbotapi.NewMessage(mainAdmin, "")
+		msg.Text = fmt.Sprintf("You have new subscriber request! \nAll /requests: %v", db.CountSubscriberRequest())
+		bot.Send(msg)
+	}
+}
+
+func DeleteSubscriber(bot *tgbotapi.BotAPI, chatID int64, mainAdmin int64, db *database.DB) bool {
+	if !db.IsSubscriber(chatID) {
+		log.Printf("Can't delete %v, is not a subscriber", chatID)
+		msg := tgbotapi.NewMessage(mainAdmin, "")
+		msg.Text = "It is not a subscriber."
+		bot.Send(msg)
+		return false
+	}
+	if db.IsAdmin(chatID) {
+		db.DeleteAdmin(chatID)
+		msg := tgbotapi.NewMessage(chatID, "*You aren't now an admin*")
+		bot.Send(msg)
+	}
+	db.DeleteSubscriber(chatID)
+	msg := tgbotapi.NewMessage(chatID, "*You aren't now a subscriber(*")
+	bot.Send(msg)
+	return true
+}
+
 func HandleSubscriberRequests(bot *tgbotapi.BotAPI, chatID int64, db *database.DB) {
 	if !db.IsAdmin(chatID) {
 		msg := tgbotapi.NewMessage(chatID, "У вас нет прав администратора.")
@@ -55,14 +96,18 @@ func HandleRequestCallback(bot *tgbotapi.BotAPI, callbackQuery *tgbotapi.Callbac
 	chatID := callbackQuery.Message.Chat.ID
 	data := callbackQuery.Data
 
+	var requestID int64
+	var err error
+
 	if strings.HasPrefix(data, "request_subscriber_") {
 		requestIDStr := strings.TrimPrefix(data, "request_subscriber_")
-		requestID, err := strconv.ParseInt(requestIDStr, 10, 64)
+		requestID, err = strconv.ParseInt(requestIDStr, 10, 64)
 		if err != nil {
 			log.Printf("Failed to parse request ID: %v", err)
 			return
 		}
 
+		log.Printf("Handling subscriber request: %d", requestID)
 		userInfo, err := db.GetSubscriberRequestInfo(requestID)
 		if err != nil {
 			log.Printf("Failed to get subscriber request info: %v", err)
@@ -84,9 +129,6 @@ func HandleRequestCallback(bot *tgbotapi.BotAPI, callbackQuery *tgbotapi.Callbac
 		}
 	}
 
-	var requestID int64
-	var err error
-
 	if strings.HasPrefix(data, "accept_subscriber_") {
 		requestIDStr := strings.TrimPrefix(data, "accept_subscriber_")
 		requestID, err = strconv.ParseInt(requestIDStr, 10, 64)
@@ -94,6 +136,7 @@ func HandleRequestCallback(bot *tgbotapi.BotAPI, callbackQuery *tgbotapi.Callbac
 			log.Printf("Failed to parse request ID: %v", err)
 			return
 		}
+		log.Printf("Accepting subscriber request: %d", requestID)
 		db.AddSubscriber(requestID)
 		msg := tgbotapi.NewMessage(requestID, "Ваша заявка принята, теперь вы подписчик!")
 		msgAdmin := tgbotapi.NewMessage(chatID, fmt.Sprintf("Заявка от %d принята.", requestID))
@@ -110,6 +153,7 @@ func HandleRequestCallback(bot *tgbotapi.BotAPI, callbackQuery *tgbotapi.Callbac
 			log.Printf("Failed to parse request ID: %v", err)
 			return
 		}
+		log.Printf("Rejecting subscriber request: %d", requestID)
 		msg := tgbotapi.NewMessage(requestID, "Ваша заявка отклонена.")
 		msgAdmin := tgbotapi.NewMessage(chatID, fmt.Sprintf("Заявка от %d отклонена.", requestID))
 		if _, err := bot.Send(msgAdmin); err != nil {
@@ -122,7 +166,7 @@ func HandleRequestCallback(bot *tgbotapi.BotAPI, callbackQuery *tgbotapi.Callbac
 	if errDB := db.DeleteSubscriberRequest(requestID); errDB != nil {
 		log.Printf("Failed to delete subscriber request: %v", err)
 	}
-	editRequestList(bot, callbackQuery.Message, db)
+	//editRequestList(bot, callbackQuery.Message, db)
 	(*inProcessSubReq)[requestID] = false
 }
 

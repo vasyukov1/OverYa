@@ -1,6 +1,7 @@
 package functions
 
 import (
+	"fmt"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/vasyukov1/Overbot/database"
 	"log"
@@ -9,16 +10,18 @@ import (
 )
 
 var (
-	broadcastMsg      = make(map[int64]string)
-	description       = make(map[int64]string)
-	isDescriptionMode = make(map[int64]bool)
-	attachmentQueue   = make(map[int64][]interface{})
+	userSubject        = make(map[int64]string)
+	userControlElement = make(map[int64]string)
+	broadcastMsg       = make(map[int64]string)
+	description        = make(map[int64]string)
+	isDescriptionMode  = make(map[int64]bool)
+	attachmentQueue    = make(map[int64][]interface{})
 )
 
 func HandleAdminBroadcast(bot *tgbotapi.BotAPI, message *tgbotapi.Message, update tgbotapi.Update, db *database.DB, telegramChannel int64, isBroadcastMode *map[int64]bool) {
 	chatID := message.Chat.ID
 	if update.CallbackQuery != nil {
-		HandleCallbackQuery(bot, update.CallbackQuery, db, telegramChannel, isBroadcastMode)
+		HandleCallbackQuery(bot, update, db, telegramChannel, isBroadcastMode)
 		return
 	}
 	if message.Text != "" && broadcastMsg[chatID] == "" {
@@ -39,8 +42,48 @@ func HandleAdminBroadcast(bot *tgbotapi.BotAPI, message *tgbotapi.Message, updat
 	handleMediaAttachments(chatID, message)
 }
 
-func SendMaterial(bot *tgbotapi.BotAPI, chatID int64, db *database.DB) {
-	files, description, err := db.GetMaterial(chatID)
+func SendMaterial(bot *tgbotapi.BotAPI, chatID int64, db *database.DB, subject, controlElement string, number int) {
+	files, description, err := db.GetMaterial(subject, controlElement, number)
+	if err != nil {
+		log.Printf("Error getting material: %v", err)
+		msg := tgbotapi.NewMessage(chatID, "Failed to retrieve the material.")
+		if _, err := bot.Send(msg); err != nil {
+			log.Printf("Failed to send message to %v: %v", chatID, err)
+		}
+		return
+	}
+
+	if len(files) == 0 {
+		msg := tgbotapi.NewMessage(chatID, "There are not materials.")
+		if _, err := bot.Send(msg); err != nil {
+			log.Printf("There are not materials for %v: %v", chatID, err)
+		}
+		return
+	}
+
+	var mediaGroup []interface{}
+	for _, fileID := range files {
+		media := tgbotapi.NewInputMediaPhoto(tgbotapi.FileID(fileID))
+		mediaGroup = append(mediaGroup, media)
+	}
+
+	if len(mediaGroup) > 0 {
+		group := tgbotapi.NewMediaGroup(chatID, mediaGroup)
+		if _, err := bot.Send(group); err != nil {
+			log.Printf("Failed to send media group to %v: %v\n", chatID, err)
+		}
+	}
+
+	if description != "" {
+		msg := tgbotapi.NewMessage(chatID, description)
+		if _, err := bot.Send(msg); err != nil {
+			log.Printf("Failed to send message to %v: %v\n", chatID, err)
+		}
+	}
+}
+
+func SendMaterialSearch(bot *tgbotapi.BotAPI, chatID int64, db *database.DB) {
+	files, description, err := db.GetMaterialSearch(chatID)
 	if err != nil {
 		log.Printf("Error getting material: %v", err)
 		msg := tgbotapi.NewMessage(chatID, "Failed to retrieve the material.")
@@ -184,10 +227,10 @@ func promptForDescriptionChoice(bot *tgbotapi.BotAPI, chatID int64) {
 	}
 }
 
-func HandleCallbackQuery(bot *tgbotapi.BotAPI, callbackQuery *tgbotapi.CallbackQuery, db *database.DB, telegramChannel int64, isBroadcastMode *map[int64]bool) {
-	chatID := callbackQuery.Message.Chat.ID
-	data := callbackQuery.Data
-	switch data {
+func HandleCallbackQuery(bot *tgbotapi.BotAPI, update tgbotapi.Update, db *database.DB, telegramChannel int64, isBroadcastMode *map[int64]bool) { //  callbackQuery *tgbotapi.CallbackQuery,
+	chatID := update.CallbackQuery.Message.Chat.ID
+	callbackData := update.CallbackQuery.Data
+	switch callbackData {
 	case "yes_description":
 		msg := tgbotapi.NewMessage(chatID, "Please provide the description")
 		if _, err := bot.Send(msg); err != nil {
@@ -198,7 +241,145 @@ func HandleCallbackQuery(bot *tgbotapi.BotAPI, callbackQuery *tgbotapi.CallbackQ
 		sendBroadcast(bot, chatID, db, telegramChannel, isBroadcastMode)
 	}
 
-	callback := tgbotapi.NewCallback(callbackQuery.ID, "")
+	if strings.HasPrefix(callbackData, "subject_") {
+		subject := strings.TrimPrefix(callbackData, "subject_")
+		userSubject[chatID] = subject
+		log.Printf("User %v choose subject: %v", chatID, subject)
+
+		controlElements := db.GetControlElements(subject)
+		if len(controlElements) == 0 {
+			msg := tgbotapi.NewMessage(chatID, "No control elements found.")
+			if _, err := bot.Send(msg); err != nil {
+				log.Printf("Send message error to %v: %v", chatID, err)
+			}
+			return
+		}
+
+		var buttons [][]tgbotapi.InlineKeyboardButton
+		for _, controlElement := range controlElements {
+			button := tgbotapi.NewInlineKeyboardButtonData(
+				fmt.Sprintf("%s", controlElement), fmt.Sprintf("control_%s", controlElement))
+			buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(button))
+		}
+		backButton := tgbotapi.NewInlineKeyboardButtonData("Back", "back_to_subjects")
+		buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(backButton))
+		keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons...)
+
+		editMsg := tgbotapi.NewEditMessageText(chatID, update.CallbackQuery.Message.MessageID, "Select a control element:")
+		editMsg.ReplyMarkup = &keyboard
+		if _, err := bot.Send(editMsg); err != nil {
+			log.Printf("Edit message error to %v: %v", chatID, err)
+		}
+
+	} else if strings.HasPrefix(callbackData, "control_") {
+		controlElement := strings.TrimPrefix(callbackData, "control_")
+		userControlElement[chatID] = controlElement
+		log.Printf("User %v choose control element: %v", chatID, controlElement)
+
+		elementNumbers := db.GetElementNumber(userSubject[chatID], controlElement)
+		if len(elementNumbers) == 0 {
+			msg := tgbotapi.NewMessage(chatID, "No element numbers found.")
+			if _, err := bot.Send(msg); err != nil {
+				log.Printf("Send message error to %v: %v", chatID, err)
+			}
+			return
+		}
+
+		var buttons [][]tgbotapi.InlineKeyboardButton
+		for _, number := range elementNumbers {
+			button := tgbotapi.NewInlineKeyboardButtonData(
+				fmt.Sprintf("%d", number), fmt.Sprintf("number_%d", number))
+			buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(button))
+		}
+		backButton := tgbotapi.NewInlineKeyboardButtonData("Back", "back_to_controls")
+		buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(backButton))
+		keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons...)
+
+		editMsg := tgbotapi.NewEditMessageText(chatID, update.CallbackQuery.Message.MessageID, "Select a number:")
+		editMsg.ReplyMarkup = &keyboard
+		if _, err := bot.Send(editMsg); err != nil {
+			log.Printf("Edit message error to %v: %v", chatID, err)
+		}
+
+	} else if strings.HasPrefix(callbackData, "number_") {
+		numberStr := strings.TrimPrefix(callbackData, "number_")
+		number, err := strconv.Atoi(numberStr)
+		if err != nil {
+			log.Println("Invalid number:", numberStr)
+			return
+		}
+		log.Printf("User %v choose element number: %v", chatID, number)
+
+		subject := userSubject[chatID]
+		controlElement := userControlElement[chatID]
+		SendMaterial(bot, chatID, db, subject, controlElement, number)
+		//materials, caption, err := db.GetMaterial(subject, controlElement, number)
+		//if err != nil {
+		//	log.Println("Error getting material:", err)
+		//	msg := tgbotapi.NewMessage(chatID, "Error retrieving material.")
+		//	if _, err := bot.Send(msg); err != nil {
+		//		log.Printf("Send message error to %v: %v", chatID, err)
+		//	}
+		//	return
+		//}
+		//
+		//for _, material := range materials {
+		//	msg := tgbotapi.NewMessage(chatID, material)
+		//	if _, err := bot.Send(msg); err != nil {
+		//		log.Printf("Send message error to %v: %v", chatID, err)
+		//	}
+		//}
+		//if caption != "" {
+		//	msg := tgbotapi.NewMessage(chatID, caption)
+		//	if _, err := bot.Send(msg); err != nil {
+		//		log.Printf("Send message error to %v: %v", chatID, err)
+		//	}
+		//}
+
+	} else if callbackData == "back_to_subjects" {
+		subjects := db.GetSubjects()
+
+		var buttons [][]tgbotapi.InlineKeyboardButton
+		for _, subject := range subjects {
+			button := tgbotapi.NewInlineKeyboardButtonData(
+				fmt.Sprintf("%s", subject), fmt.Sprintf("subject_%s", subject))
+			buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(button))
+		}
+		keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons...)
+
+		editMsg := tgbotapi.NewEditMessageText(chatID, update.CallbackQuery.Message.MessageID, "Select a subject:")
+		editMsg.ReplyMarkup = &keyboard
+		bot.Send(editMsg)
+
+	} else if callbackData == "back_to_controls" {
+		subject := userSubject[chatID]
+		controlElements := db.GetControlElements(subject)
+		if len(controlElements) == 0 {
+			msg := tgbotapi.NewMessage(chatID, "No control elements found.")
+			if _, err := bot.Send(msg); err != nil {
+				log.Printf("Send message error to %v: %v", chatID, err)
+			}
+			return
+		}
+
+		var buttons [][]tgbotapi.InlineKeyboardButton
+		for _, controlElement := range controlElements {
+			button := tgbotapi.NewInlineKeyboardButtonData(
+				fmt.Sprintf("%s", controlElement), fmt.Sprintf("control_%s", controlElement))
+			buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(button))
+		}
+		backButton := tgbotapi.NewInlineKeyboardButtonData("Back", "back_to_subjects")
+		buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(backButton))
+		keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons...)
+
+		editMsg := tgbotapi.NewEditMessageText(chatID, update.CallbackQuery.Message.MessageID, "Select a control element:")
+		editMsg.ReplyMarkup = &keyboard
+		if _, err := bot.Send(editMsg); err != nil {
+			log.Printf("Edit message error to %v: %v", chatID, err)
+		}
+	}
+
+	callback := tgbotapi.NewCallback(update.CallbackQuery.ID, "")
 	if _, err := bot.Request(callback); err != nil {
 		log.Printf("Callback error: %v", err)
 	}
@@ -233,5 +414,30 @@ func handleMediaAttachments(chatID int64, message *tgbotapi.Message) {
 	} else if message.Document != nil {
 		document := tgbotapi.NewInputMediaDocument(tgbotapi.FileID(message.Document.FileID))
 		attachmentQueue[chatID] = append(attachmentQueue[chatID], document)
+	}
+}
+
+func handleGetSubjects(bot *tgbotapi.BotAPI, chatID int64, db *database.DB) {
+	subjects := db.GetSubjects()
+	if len(subjects) == 0 {
+		msg := tgbotapi.NewMessage(chatID, "No subjects found.")
+		if _, err := bot.Send(msg); err != nil {
+			log.Printf("Send message error to %v: %v", chatID, err)
+		}
+		return
+	}
+
+	var buttons [][]tgbotapi.InlineKeyboardButton
+	for _, subject := range subjects {
+		button := tgbotapi.NewInlineKeyboardButtonData(
+			fmt.Sprintf("%s", subject), fmt.Sprintf("subject_%s", subject))
+		buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(button))
+	}
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons...)
+
+	msg := tgbotapi.NewMessage(chatID, "Select a subject:")
+	msg.ReplyMarkup = keyboard
+	if _, err := bot.Send(msg); err != nil {
+		log.Printf("Send message error to %v: %v", chatID, err)
 	}
 }
