@@ -18,6 +18,8 @@ var (
 	attachmentQueue    = make(map[int64][]interface{})
 )
 
+const MaxMediaGroupSize = 10
+
 func HandleAdminBroadcast(bot *tgbotapi.BotAPI, message *tgbotapi.Message, update tgbotapi.Update, db *database.DB, telegramChannel int64, isBroadcastMode *map[int64]bool) {
 	chatID := message.Chat.ID
 	if update.CallbackQuery != nil {
@@ -62,22 +64,61 @@ func SendMaterial(bot *tgbotapi.BotAPI, chatID int64, db *database.DB, subject, 
 	}
 
 	var mediaGroup []interface{}
-	for _, fileID := range files {
-		media := tgbotapi.NewInputMediaPhoto(tgbotapi.FileID(fileID))
-		mediaGroup = append(mediaGroup, media)
+	var hasDocumentsOrVideos bool
+
+	for i, fileID := range files {
+		if strings.HasSuffix(fileID, ".jpg") || strings.HasSuffix(fileID, ".jpeg") || strings.HasSuffix(fileID, ".png") {
+			media := tgbotapi.NewInputMediaPhoto(tgbotapi.FileID(fileID))
+			mediaGroup = append(mediaGroup, media)
+			if i == 0 && description != "" {
+				media.Caption = description
+			}
+		} else {
+			media := tgbotapi.NewInputMediaDocument(tgbotapi.FileID(fileID))
+			mediaGroup = append(mediaGroup, media)
+			hasDocumentsOrVideos = true
+		}
+
 	}
 
-	if len(mediaGroup) > 0 {
-		group := tgbotapi.NewMediaGroup(chatID, mediaGroup)
-		if _, err := bot.Send(group); err != nil {
-			log.Printf("Failed to send media group to %v: %v\n", chatID, err)
+	if hasDocumentsOrVideos {
+		if len(mediaGroup) > 0 {
+			group := tgbotapi.NewMediaGroup(chatID, mediaGroup)
+			if _, err := bot.Send(group); err != nil {
+				log.Printf("Failed to send media group to %v: %v\n", chatID, err)
+			}
+		}
+	} else {
+		if len(mediaGroup) > 0 {
+			group := tgbotapi.NewMediaGroup(chatID, mediaGroup)
+			if _, err := bot.Send(group); err != nil {
+				log.Printf("Failed to send photo group to %v: %v\n", chatID, err)
+			}
 		}
 	}
-
 	if description != "" {
 		msg := tgbotapi.NewMessage(chatID, description)
 		if _, err := bot.Send(msg); err != nil {
-			log.Printf("Failed to send message to %v: %v\n", chatID, err)
+			log.Printf("Failed to send description message to %v: %v\n", chatID, err)
+		}
+	}
+
+}
+
+func sendMediaGroup(bot *tgbotapi.BotAPI, chatID int64, mediaGroup []interface{}, hasDocumentsOrVideos bool) {
+	if hasDocumentsOrVideos {
+		if len(mediaGroup) > 0 {
+			group := tgbotapi.NewMediaGroup(chatID, mediaGroup)
+			if _, err := bot.Send(group); err != nil {
+				log.Printf("Failed to send media group to %v: %v\n", chatID, err)
+			}
+		}
+	} else {
+		if len(mediaGroup) > 0 {
+			group := tgbotapi.NewMediaGroup(chatID, mediaGroup)
+			if _, err := bot.Send(group); err != nil {
+				log.Printf("Failed to send photo group to %v: %v\n", chatID, err)
+			}
 		}
 	}
 }
@@ -102,24 +143,62 @@ func SendMaterialSearch(bot *tgbotapi.BotAPI, chatID int64, db *database.DB) {
 	}
 
 	var mediaGroup []interface{}
-	for _, fileID := range files {
-		media := tgbotapi.NewInputMediaPhoto(tgbotapi.FileID(fileID))
-		mediaGroup = append(mediaGroup, media)
+	var hasDocumentsOrVideos bool
+
+	for i, fileID := range files {
+		//media := tgbotapi.NewInputMediaPhoto(tgbotapi.FileID(fileID))
+		//mediaGroup = append(mediaGroup, media)
+		if strings.HasSuffix(fileID, ".jpg") || strings.HasSuffix(fileID, ".jpeg") || strings.HasSuffix(fileID, ".png") {
+			media := tgbotapi.NewInputMediaPhoto(tgbotapi.FileID(fileID))
+			mediaGroup = append(mediaGroup, media)
+			if i == 0 && description != "" {
+				media.Caption = description
+			}
+		} else {
+			media := tgbotapi.NewInputMediaDocument(tgbotapi.FileID(fileID))
+			mediaGroup = append(mediaGroup, media)
+			if i == 0 && description != "" {
+				media.Caption = description
+			}
+			hasDocumentsOrVideos = true
+		}
+
 	}
 
-	if len(mediaGroup) > 0 {
-		group := tgbotapi.NewMediaGroup(chatID, mediaGroup)
-		if _, err := bot.Send(group); err != nil {
-			log.Printf("Failed to send media group to %v: %v\n", chatID, err)
+	if hasDocumentsOrVideos {
+		if len(mediaGroup) > 0 {
+			group := tgbotapi.NewMediaGroup(chatID, mediaGroup)
+			if _, err := bot.Send(group); err != nil {
+				log.Printf("Failed to send media group to %v: %v\n", chatID, err)
+			}
+		}
+	} else {
+		if len(mediaGroup) > 0 {
+			group := tgbotapi.NewMediaGroup(chatID, mediaGroup)
+			if _, err := bot.Send(group); err != nil {
+				log.Printf("Failed to send photo group to %v: %v\n", chatID, err)
+			}
 		}
 	}
 
-	if description != "" {
-		msg := tgbotapi.NewMessage(chatID, description)
-		if _, err := bot.Send(msg); err != nil {
-			log.Printf("Failed to send message to %v: %v\n", chatID, err)
-		}
-	}
+	//for _, fileID := range files {
+	//	media := tgbotapi.NewInputMediaPhoto(tgbotapi.FileID(fileID))
+	//	mediaGroup = append(mediaGroup, media)
+	//}
+	//
+	//if len(mediaGroup) > 0 {
+	//	group := tgbotapi.NewMediaGroup(chatID, mediaGroup)
+	//	if _, err := bot.Send(group); err != nil {
+	//		log.Printf("Failed to send media group to %v: %v\n", chatID, err)
+	//	}
+	//}
+	//
+	//if description != "" {
+	//	msg := tgbotapi.NewMessage(chatID, description)
+	//	if _, err := bot.Send(msg); err != nil {
+	//		log.Printf("Failed to send message to %v: %v\n", chatID, err)
+	//	}
+	//}
 }
 
 func broadcast(bot *tgbotapi.BotAPI, message string, attachments []interface{}, description string, db *database.DB, telegramChannel int64) {
@@ -313,28 +392,6 @@ func HandleCallbackQuery(bot *tgbotapi.BotAPI, update tgbotapi.Update, db *datab
 		subject := userSubject[chatID]
 		controlElement := userControlElement[chatID]
 		SendMaterial(bot, chatID, db, subject, controlElement, number)
-		//materials, caption, err := db.GetMaterial(subject, controlElement, number)
-		//if err != nil {
-		//	log.Println("Error getting material:", err)
-		//	msg := tgbotapi.NewMessage(chatID, "Error retrieving material.")
-		//	if _, err := bot.Send(msg); err != nil {
-		//		log.Printf("Send message error to %v: %v", chatID, err)
-		//	}
-		//	return
-		//}
-		//
-		//for _, material := range materials {
-		//	msg := tgbotapi.NewMessage(chatID, material)
-		//	if _, err := bot.Send(msg); err != nil {
-		//		log.Printf("Send message error to %v: %v", chatID, err)
-		//	}
-		//}
-		//if caption != "" {
-		//	msg := tgbotapi.NewMessage(chatID, caption)
-		//	if _, err := bot.Send(msg); err != nil {
-		//		log.Printf("Send message error to %v: %v", chatID, err)
-		//	}
-		//}
 
 	} else if callbackData == "back_to_subjects" {
 		subjects := db.GetSubjects()
@@ -349,7 +406,9 @@ func HandleCallbackQuery(bot *tgbotapi.BotAPI, update tgbotapi.Update, db *datab
 
 		editMsg := tgbotapi.NewEditMessageText(chatID, update.CallbackQuery.Message.MessageID, "Select a subject:")
 		editMsg.ReplyMarkup = &keyboard
-		bot.Send(editMsg)
+		if _, err := bot.Send(editMsg); err != nil {
+			return
+		}
 
 	} else if callbackData == "back_to_controls" {
 		subject := userSubject[chatID]

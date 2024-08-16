@@ -198,8 +198,6 @@ func editAdminRequestList(bot *tgbotapi.BotAPI, message *tgbotapi.Message, db *d
 	}
 }
 
-//
-
 func HandleGetAdminsInfo(bot *tgbotapi.BotAPI, chatID int64, db *database.DB) {
 	adminsList := db.GetAdmins()
 	if len(adminsList) == 0 {
