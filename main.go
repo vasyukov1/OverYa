@@ -130,7 +130,7 @@ func main() {
 				case "get_admins_info":
 					admins.HandleGetAdminsInfo(bot, chatID, db)
 				case "get_materials":
-					handleGetSubjects(bot, update.Message.MessageID, chatID, db, 0)
+					handleGetSubjects(bot, update, chatID, db, 0)
 				case "delete_material":
 					if chatID == adminMain {
 						msg.Text = "Send subject, control element, element number (ex. 'Алгебра КР 1')"
@@ -306,15 +306,14 @@ func main() {
 				functions.HandleCallbackQuery(bot, update, db, telegramChannel, &isBroadcastMode)
 			}
 		} else if update.CallbackQuery != nil && db.IsSubscriber(update.CallbackQuery.From.ID) {
-			handleCallbackQuery(bot, update.CallbackQuery, db)
+			handleCallbackQuery(bot, update, db)
 		}
 	}
 }
 
-func handleGetSubjects(bot *tgbotapi.BotAPI, messageID int, chatID int64, db *database.DB, page int) {
+func handleGetSubjects(bot *tgbotapi.BotAPI, update tgbotapi.Update, chatID int64, db *database.DB, page int) {
 	const itemsPerPageFirstLast = 9
 	const itemsPerPageMiddle = 8
-	log.Printf("messageID: %v", messageID)
 	subjects := db.GetSubjects()
 	if len(subjects) == 0 {
 		msg := tgbotapi.NewMessage(chatID, "No subjects found.")
@@ -324,12 +323,17 @@ func handleGetSubjects(bot *tgbotapi.BotAPI, messageID int, chatID int64, db *da
 		return
 	}
 
-	startIndex := page * itemsPerPageMiddle
-	var endIndex int
-	if page == 0 || (page+1)*itemsPerPageMiddle >= len(subjects) {
-		endIndex = startIndex + itemsPerPageFirstLast
+	var startIndex, endIndex int
+	if page == 0 {
+		startIndex = 0
+		endIndex = itemsPerPageFirstLast
 	} else {
+		startIndex = itemsPerPageFirstLast + (page-1)*itemsPerPageMiddle
 		endIndex = startIndex + itemsPerPageMiddle
+	}
+
+	if endIndex > len(subjects) {
+		endIndex = len(subjects)
 	}
 
 	if endIndex > len(subjects) {
@@ -355,48 +359,25 @@ func handleGetSubjects(bot *tgbotapi.BotAPI, messageID int, chatID int64, db *da
 	}
 
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons...)
-
-	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "Select a subject:")
-	editMsg.ReplyMarkup = &keyboard
-
-	if _, err := bot.Send(editMsg); err != nil {
+	if update.CallbackQuery == nil {
 		msg := tgbotapi.NewMessage(chatID, "Select a subject:")
 		msg.ReplyMarkup = keyboard
 		if _, err := bot.Send(msg); err != nil {
 			log.Printf("Send message error to %v: %v", chatID, err)
 		}
+	} else {
+		editMsg := tgbotapi.NewEditMessageText(chatID, update.CallbackQuery.Message.MessageID, "Select a subject:")
+		editMsg.ReplyMarkup = &keyboard
+		if _, err := bot.Send(editMsg); err != nil {
+			log.Printf("Edit message error to %v: %v", chatID, err)
+		}
 	}
 }
 
-//func handleGetSubjects(bot *tgbotapi.BotAPI, chatID int64, db *database.DB) {
-//	subjects := db.GetSubjects()
-//	if len(subjects) == 0 {
-//		msg := tgbotapi.NewMessage(chatID, "No subjects found.")
-//		if _, err := bot.Send(msg); err != nil {
-//			log.Printf("Send message error to %v: %v", chatID, err)
-//		}
-//		return
-//	}
-//
-//	var buttons [][]tgbotapi.InlineKeyboardButton
-//	for _, subject := range subjects {
-//		button := tgbotapi.NewInlineKeyboardButtonData(
-//			fmt.Sprintf("%s", subject), fmt.Sprintf("subject_%s", subject))
-//		buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(button))
-//	}
-//	keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons...)
-//
-//	msg := tgbotapi.NewMessage(chatID, "Select a subject:")
-//	msg.ReplyMarkup = keyboard
-//	if _, err := bot.Send(msg); err != nil {
-//		log.Printf("Send message error to %v: %v", chatID, err)
-//	}
-//}
+func handleCallbackQuery(bot *tgbotapi.BotAPI, update tgbotapi.Update, db *database.DB) {
+	chatID := update.CallbackQuery.Message.Chat.ID
+	callbackData := update.CallbackQuery.Data
 
-func handleCallbackQuery(bot *tgbotapi.BotAPI, callbackQuery *tgbotapi.CallbackQuery, db *database.DB) {
-	chatID := callbackQuery.Message.Chat.ID
-	callbackData := callbackQuery.Data
-	log.Printf("YAROSLAVA")
 	if strings.HasPrefix(callbackData, "subjects_page_") {
 		pageStr := strings.TrimPrefix(callbackData, "subjects_page_")
 		page, err := strconv.Atoi(pageStr)
@@ -406,10 +387,10 @@ func handleCallbackQuery(bot *tgbotapi.BotAPI, callbackQuery *tgbotapi.CallbackQ
 			return
 		}
 
-		handleGetSubjects(bot, callbackQuery.Message.MessageID, chatID, db, page)
+		handleGetSubjects(bot, update, chatID, db, page)
 
 		//Отвечаем на callback_query, чтобы убрать индикатор ожидания в клиенте
-		answer := tgbotapi.NewCallback(callbackQuery.ID, "")
+		answer := tgbotapi.NewCallback(update.CallbackQuery.ID, "")
 		if _, err := bot.Request(answer); err != nil {
 			log.Printf("Error sending callback response: %v", err)
 		}
@@ -417,7 +398,7 @@ func handleCallbackQuery(bot *tgbotapi.BotAPI, callbackQuery *tgbotapi.CallbackQ
 		subject := strings.TrimPrefix(callbackData, "subject_")
 		userSubject[chatID] = subject
 		log.Printf("User %v choose subject: %v", chatID, subject)
-
+		
 		controlElements := db.GetControlElements(subject)
 		if len(controlElements) == 0 {
 			msg := tgbotapi.NewMessage(chatID, "No control elements found.")
@@ -437,7 +418,7 @@ func handleCallbackQuery(bot *tgbotapi.BotAPI, callbackQuery *tgbotapi.CallbackQ
 		buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(backButton))
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons...)
 
-		editMsg := tgbotapi.NewEditMessageText(chatID, callbackQuery.Message.MessageID, "Select a control element:")
+		editMsg := tgbotapi.NewEditMessageText(chatID, update.CallbackQuery.Message.MessageID, "Select a control element:")
 		editMsg.ReplyMarkup = &keyboard
 		if _, err := bot.Send(editMsg); err != nil {
 			log.Printf("Edit message error to %v: %v", chatID, err)
@@ -467,7 +448,7 @@ func handleCallbackQuery(bot *tgbotapi.BotAPI, callbackQuery *tgbotapi.CallbackQ
 		buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(backButton))
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons...)
 
-		editMsg := tgbotapi.NewEditMessageText(chatID, callbackQuery.Message.MessageID, "Select a number:")
+		editMsg := tgbotapi.NewEditMessageText(chatID, update.CallbackQuery.Message.MessageID, "Select a number:")
 		editMsg.ReplyMarkup = &keyboard
 		if _, err := bot.Send(editMsg); err != nil {
 			log.Printf("Edit message error to %v: %v", chatID, err)
@@ -497,7 +478,7 @@ func handleCallbackQuery(bot *tgbotapi.BotAPI, callbackQuery *tgbotapi.CallbackQ
 		}
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons...)
 
-		editMsg := tgbotapi.NewEditMessageText(chatID, callbackQuery.Message.MessageID, "Select a subject:")
+		editMsg := tgbotapi.NewEditMessageText(chatID, update.CallbackQuery.Message.MessageID, "Select a subject:")
 		editMsg.ReplyMarkup = &keyboard
 
 		if _, err := bot.Send(editMsg); err != nil {
@@ -525,7 +506,7 @@ func handleCallbackQuery(bot *tgbotapi.BotAPI, callbackQuery *tgbotapi.CallbackQ
 		buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(backButton))
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons...)
 
-		editMsg := tgbotapi.NewEditMessageText(chatID, callbackQuery.Message.MessageID, "Select a control element:")
+		editMsg := tgbotapi.NewEditMessageText(chatID, update.CallbackQuery.Message.MessageID, "Select a control element:")
 		editMsg.ReplyMarkup = &keyboard
 		if _, err := bot.Send(editMsg); err != nil {
 			log.Printf("Edit message error to %v: %v", chatID, err)

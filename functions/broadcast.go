@@ -146,8 +146,6 @@ func SendMaterialSearch(bot *tgbotapi.BotAPI, chatID int64, db *database.DB) {
 	var hasDocumentsOrVideos bool
 
 	for i, fileID := range files {
-		//media := tgbotapi.NewInputMediaPhoto(tgbotapi.FileID(fileID))
-		//mediaGroup = append(mediaGroup, media)
 		if strings.HasSuffix(fileID, ".jpg") || strings.HasSuffix(fileID, ".jpeg") || strings.HasSuffix(fileID, ".png") {
 			media := tgbotapi.NewInputMediaPhoto(tgbotapi.FileID(fileID))
 			mediaGroup = append(mediaGroup, media)
@@ -180,25 +178,6 @@ func SendMaterialSearch(bot *tgbotapi.BotAPI, chatID int64, db *database.DB) {
 			}
 		}
 	}
-
-	//for _, fileID := range files {
-	//	media := tgbotapi.NewInputMediaPhoto(tgbotapi.FileID(fileID))
-	//	mediaGroup = append(mediaGroup, media)
-	//}
-	//
-	//if len(mediaGroup) > 0 {
-	//	group := tgbotapi.NewMediaGroup(chatID, mediaGroup)
-	//	if _, err := bot.Send(group); err != nil {
-	//		log.Printf("Failed to send media group to %v: %v\n", chatID, err)
-	//	}
-	//}
-	//
-	//if description != "" {
-	//	msg := tgbotapi.NewMessage(chatID, description)
-	//	if _, err := bot.Send(msg); err != nil {
-	//		log.Printf("Failed to send message to %v: %v\n", chatID, err)
-	//	}
-	//}
 }
 
 func broadcast(bot *tgbotapi.BotAPI, message string, attachments []interface{}, description string, db *database.DB, telegramChannel int64) {
@@ -320,7 +299,23 @@ func HandleCallbackQuery(bot *tgbotapi.BotAPI, update tgbotapi.Update, db *datab
 		sendBroadcast(bot, chatID, db, telegramChannel, isBroadcastMode)
 	}
 
-	if strings.HasPrefix(callbackData, "subject_") {
+	if strings.HasPrefix(callbackData, "subjects_page_") {
+		pageStr := strings.TrimPrefix(callbackData, "subjects_page_")
+		page, err := strconv.Atoi(pageStr)
+
+		if err != nil {
+			log.Printf("Invalid page number: %v", err)
+			return
+		}
+
+		handleGetSubjects(bot, update, chatID, db, page)
+
+		//Отвечаем на callback_query, чтобы убрать индикатор ожидания в клиенте
+		answer := tgbotapi.NewCallback(update.CallbackQuery.ID, "")
+		if _, err := bot.Request(answer); err != nil {
+			log.Printf("Error sending callback response: %v", err)
+		}
+	} else if strings.HasPrefix(callbackData, "subject_") {
 		subject := strings.TrimPrefix(callbackData, "subject_")
 		userSubject[chatID] = subject
 		log.Printf("User %v choose subject: %v", chatID, subject)
@@ -406,6 +401,7 @@ func HandleCallbackQuery(bot *tgbotapi.BotAPI, update tgbotapi.Update, db *datab
 
 		editMsg := tgbotapi.NewEditMessageText(chatID, update.CallbackQuery.Message.MessageID, "Select a subject:")
 		editMsg.ReplyMarkup = &keyboard
+
 		if _, err := bot.Send(editMsg); err != nil {
 			return
 		}
@@ -476,7 +472,9 @@ func handleMediaAttachments(chatID int64, message *tgbotapi.Message) {
 	}
 }
 
-func handleGetSubjects(bot *tgbotapi.BotAPI, chatID int64, db *database.DB) {
+func handleGetSubjects(bot *tgbotapi.BotAPI, update tgbotapi.Update, chatID int64, db *database.DB, page int) {
+	const itemsPerPageFirstLast = 9
+	const itemsPerPageMiddle = 8
 	subjects := db.GetSubjects()
 	if len(subjects) == 0 {
 		msg := tgbotapi.NewMessage(chatID, "No subjects found.")
@@ -486,17 +484,53 @@ func handleGetSubjects(bot *tgbotapi.BotAPI, chatID int64, db *database.DB) {
 		return
 	}
 
+	var startIndex, endIndex int
+	if page == 0 {
+		startIndex = 0
+		endIndex = itemsPerPageFirstLast
+	} else {
+		startIndex = itemsPerPageFirstLast + (page-1)*itemsPerPageMiddle
+		endIndex = startIndex + itemsPerPageMiddle
+	}
+
+	if endIndex > len(subjects) {
+		endIndex = len(subjects)
+	}
+
+	if endIndex > len(subjects) {
+		endIndex = len(subjects)
+	}
+
 	var buttons [][]tgbotapi.InlineKeyboardButton
-	for _, subject := range subjects {
+	for _, subject := range subjects[startIndex:endIndex] {
 		button := tgbotapi.NewInlineKeyboardButtonData(
 			fmt.Sprintf("%s", subject), fmt.Sprintf("subject_%s", subject))
 		buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(button))
 	}
-	keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons...)
 
-	msg := tgbotapi.NewMessage(chatID, "Select a subject:")
-	msg.ReplyMarkup = keyboard
-	if _, err := bot.Send(msg); err != nil {
-		log.Printf("Send message error to %v: %v", chatID, err)
+	var navigationButtons []tgbotapi.InlineKeyboardButton
+	if page > 0 {
+		navigationButtons = append(navigationButtons, tgbotapi.NewInlineKeyboardButtonData("⬅️ Назад", fmt.Sprintf("subjects_page_%d", page-1)))
+	}
+	if endIndex < len(subjects) {
+		navigationButtons = append(navigationButtons, tgbotapi.NewInlineKeyboardButtonData("Дальше ➡️", fmt.Sprintf("subjects_page_%d", page+1)))
+	}
+	if len(navigationButtons) > 0 {
+		buttons = append(buttons, navigationButtons)
+	}
+
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons...)
+	if update.CallbackQuery == nil {
+		msg := tgbotapi.NewMessage(chatID, "Select a subject:")
+		msg.ReplyMarkup = keyboard
+		if _, err := bot.Send(msg); err != nil {
+			log.Printf("Send message error to %v: %v", chatID, err)
+		}
+	} else {
+		editMsg := tgbotapi.NewEditMessageText(chatID, update.CallbackQuery.Message.MessageID, "Select a subject:")
+		editMsg.ReplyMarkup = &keyboard
+		if _, err := bot.Send(editMsg); err != nil {
+			log.Printf("Edit message error to %v: %v", chatID, err)
+		}
 	}
 }
