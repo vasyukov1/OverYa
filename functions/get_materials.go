@@ -255,6 +255,14 @@ func HandleCallbackQuery(bot *tgbotapi.BotAPI, update tgbotapi.Update, db *datab
 		log.Printf("User %v choose element number: %v", chatID, number)
 		subject := userSubject[chatID]
 		controlElement := userControlElement[chatID]
+
+		deleteMsg := tgbotapi.NewDeleteMessage(chatID, update.CallbackQuery.Message.MessageID)
+		if _, err := bot.Send(deleteMsg); err != nil {
+			if !isUnmarshalBoolError(err) {
+				log.Printf("Failed to delete message with button to %v: %v", chatID, err)
+			}
+		}
+
 		SendMaterial(bot, chatID, db, subject, controlElement, number)
 
 	} else if callbackData == "back_to_subjects" {
@@ -264,10 +272,41 @@ func HandleCallbackQuery(bot *tgbotapi.BotAPI, update tgbotapi.Update, db *datab
 		subject := userSubject[chatID]
 		handleGetControlElements(bot, update, chatID, db, subject, 0)
 
+	} else if strings.HasPrefix(callbackData, "edit_material_") {
+		parts := strings.Split(callbackData, "_")
+		if len(parts) != 5 {
+			log.Printf("Invalid callback data: %v", callbackData)
+			return
+		}
+		subject := parts[2]
+		controlElement := parts[3]
+		number, err := strconv.Atoi(parts[4])
+		if err != nil {
+			log.Printf("Invalid material number: %v", parts[4])
+			return
+		}
+
+		handleEditMaterial(bot, chatID, db, subject, controlElement, number)
+
+	} else if callbackData == "do_not_edit_material" {
+		msg := tgbotapi.NewMessage(chatID, "Рассылка отклонена.")
+		if _, err := bot.Send(msg); err != nil {
+			log.Printf("Failed to send message to %v: %v", chatID, err)
+		}
+	} else if strings.HasPrefix(callbackData, "dit_material_") {
+
+	} else if strings.HasPrefix(callbackData, "edit_media_") {
+
+	} else if strings.HasPrefix(callbackData, "edit_description_") {
+
 	}
 
 	callback := tgbotapi.NewCallback(update.CallbackQuery.ID, "")
 	if _, err := bot.Request(callback); err != nil {
 		log.Printf("Callback error: %v", err)
 	}
+}
+
+func isUnmarshalBoolError(err error) bool {
+	return strings.Contains(err.Error(), "json: cannot unmarshal bool into Go value of type tgbotapi.Message")
 }

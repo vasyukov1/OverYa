@@ -42,7 +42,7 @@ func HandleAdminBroadcast(bot *tgbotapi.BotAPI, message *tgbotapi.Message, updat
 	handleMediaAttachments(chatID, message)
 }
 
-func broadcast(bot *tgbotapi.BotAPI, message string, attachments []interface{}, description string, db *database.DB, telegramChannel int64) {
+func broadcast(bot *tgbotapi.BotAPI, chatID int64, message string, attachments []interface{}, description string, db *database.DB, telegramChannel int64) {
 	subscribers := db.GetSubscribers()
 	var groupPhoto []interface{}
 	var groupDocument []interface{}
@@ -70,7 +70,11 @@ func broadcast(bot *tgbotapi.BotAPI, message string, attachments []interface{}, 
 				}
 			}
 		}
-
+		msg := tgbotapi.NewMessage(chatID, "")
+		msg.Text = fmt.Sprintf("РАССЫЛКА")
+		if _, err := bot.Send(msg); err != nil {
+			log.Printf("Failed to send message to %v: %v", chatID, err)
+		}
 		for i := 0; i < len(groupPhoto); i += 10 {
 			end := i + 10
 			if end > len(groupPhoto) {
@@ -93,7 +97,6 @@ func broadcast(bot *tgbotapi.BotAPI, message string, attachments []interface{}, 
 			sendMediaGroup(groupDocument[i:end])
 		}
 
-		msg := tgbotapi.NewMessage(chatID, "")
 		msg.Text = fmt.Sprintf("%v\n\n%v", message, description)
 		if _, err := bot.Send(msg); err != nil {
 			log.Printf("Failed to send message to %v: %v", chatID, err)
@@ -161,9 +164,27 @@ func broadcast(bot *tgbotapi.BotAPI, message string, attachments []interface{}, 
 			log.Printf("Subject exists: %v\n", subject)
 		}
 
-		err = db.AddMaterial(subject, controlElement, number, links, description)
-		if err != nil {
-			return
+		if db.IsMaterialExists(subject, controlElement, number) {
+			msg := tgbotapi.NewMessage(chatID, "")
+			msg.Text = fmt.Sprintf("Material `%v %v %v` is already existing", subject, controlElement, number)
+			if _, err := bot.Send(msg); err != nil {
+				log.Printf("Failed to send message to %v: %v", chatID, err)
+			}
+			buttons := []tgbotapi.InlineKeyboardButton{
+				tgbotapi.NewInlineKeyboardButtonData("Да", fmt.Sprintf("edit_material_%v_%v_%v", subject, controlElement, number)),
+				tgbotapi.NewInlineKeyboardButtonData("Нет", "do_not_edit_material"),
+			}
+			keyboard := tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(buttons...))
+			editMsg := tgbotapi.NewMessage(chatID, "Хотите редактировать его?")
+			editMsg.ReplyMarkup = &keyboard
+			if _, err := bot.Send(editMsg); err != nil {
+				log.Printf("Failed to send message with buttons to %v: %v", chatID, err)
+			}
+		} else {
+			err = db.AddMaterial(subject, controlElement, number, links, description)
+			if err != nil {
+				return
+			}
 		}
 
 	} else {
@@ -194,7 +215,7 @@ func promptForAttachments(bot *tgbotapi.BotAPI, chatID int64) {
 
 func sendBroadcast(bot *tgbotapi.BotAPI, chatID int64, db *database.DB, telegramChannel int64, isBroadcastMode *map[int64]bool) {
 	(*isBroadcastMode)[chatID] = false
-	broadcast(bot, broadcastMsg[chatID], attachmentQueue[chatID], description[chatID], db, telegramChannel)
+	broadcast(bot, chatID, broadcastMsg[chatID], attachmentQueue[chatID], description[chatID], db, telegramChannel)
 	description[chatID] = ""
 	broadcastMsg[chatID] = ""
 	attachmentQueue[chatID] = []interface{}{}
@@ -217,5 +238,24 @@ func handleMediaAttachments(chatID int64, message *tgbotapi.Message) {
 		fileID := message.Document.FileID
 		document := tgbotapi.NewInputMediaDocument(tgbotapi.FileID(fileID))
 		attachmentQueue[chatID] = append(attachmentQueue[chatID], document)
+	}
+}
+
+func handleEditMaterial(bot *tgbotapi.BotAPI, chatID int64, db *database.DB, subject, controlElement string, number int) {
+	msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("Редактирование материала %v %v %v", subject, controlElement, number))
+	if _, err := bot.Send(msg); err != nil {
+		log.Printf("Failed to send message to %v: %v", chatID, err)
+	}
+
+	buttons := []tgbotapi.InlineKeyboardButton{
+		tgbotapi.NewInlineKeyboardButtonData("Название", fmt.Sprintf("edit_material_%v_%v_%v", subject, controlElement, number)),
+		tgbotapi.NewInlineKeyboardButtonData("Медиа", fmt.Sprintf("edit_media_%v_%v_%v", subject, controlElement, number)),
+		tgbotapi.NewInlineKeyboardButtonData("Описание", fmt.Sprintf("edit_description_%v_%v_%v", subject, controlElement, number)),
+	}
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(buttons...))
+	msg.Text = "Выберите, что хотите изменить?"
+	msg.ReplyMarkup = &keyboard
+	if _, err := bot.Send(msg); err != nil {
+		log.Printf("Failed to send message with buttons to %v: %v", chatID, err)
 	}
 }

@@ -106,7 +106,7 @@ func main() {
 					}
 				case "delete_admin":
 					if chatID == adminMain {
-						msg.Text = "Send admin's ID"
+						msg.Text = "Send admin ID"
 						isDeleteAdminMode = true
 					}
 				case "become_admin":
@@ -206,52 +206,58 @@ func main() {
 							if _, err := bot.Send(msg); err != nil {
 								log.Printf("Error sending message: %v\n", err)
 							}
-						}
-						number, err := strconv.Atoi(parts[2])
-						if err != nil {
-							log.Printf("Error converting parts number: %v\n", err)
-							msg := tgbotapi.NewMessage(chatID, "Неверный номер материала для удаления.")
-							isDeleteMaterialMode = false
-							if _, err := bot.Send(msg); err != nil {
-								log.Printf("Error sending message: %v\n", err)
-							}
-						}
-						if !db.IsMaterialExists(parts[0], parts[1], number) {
-							msg := tgbotapi.NewMessage(chatID, "Не удалось найти материал для удаления")
-							if _, err = bot.Send(msg); err != nil {
-								log.Printf("Error sending message: %v\n", err)
-							}
-						}
-						err = db.RemoveMaterial(parts[0], parts[1], number)
-						if err != nil {
-							log.Printf("Error removing material: %v\n", err)
-							msg := tgbotapi.NewMessage(chatID, "Ошибка при удалении материала.")
-							if _, err := bot.Send(msg); err != nil {
-								log.Printf("Error sending message: %v\n", err)
-							}
 						} else {
-							log.Printf("Removed material: %v\n", update.Message.Text)
-							msg := tgbotapi.NewMessage(chatID, "")
-							msg.Text = fmt.Sprintf("Материал '%v' удалён.", update.Message.Text)
-							if _, err := bot.Send(msg); err != nil {
-								log.Printf("Error sending message: %v\n", err)
+							number, err := strconv.Atoi(parts[2])
+							if err != nil {
+								log.Printf("Error converting parts number: %v\n", err)
+								msg := tgbotapi.NewMessage(chatID, "Неверный номер материала для удаления.")
+								if _, err := bot.Send(msg); err != nil {
+									log.Printf("Error sending message: %v\n", err)
+								}
+							}
+							if !db.IsMaterialExists(parts[0], parts[1], number) {
+								msg := tgbotapi.NewMessage(chatID, "Не удалось найти материал для удаления")
+								if _, err = bot.Send(msg); err != nil {
+									log.Printf("Error sending message: %v\n", err)
+								}
+							}
+							isDeleteMaterialMode = false
+							err = db.RemoveMaterial(parts[0], parts[1], number)
+							if err != nil {
+								log.Printf("Error removing material: %v\n", err)
+								msg := tgbotapi.NewMessage(chatID, "Ошибка при удалении материала.")
+								if _, err := bot.Send(msg); err != nil {
+									log.Printf("Error sending message: %v\n", err)
+								}
+							} else {
+								log.Printf("Removed material: %v\n", update.Message.Text)
+								msg := tgbotapi.NewMessage(chatID, "")
+								msg.Text = fmt.Sprintf("Материал '%v' удалён.", update.Message.Text)
+								if _, err := bot.Send(msg); err != nil {
+									log.Printf("Error sending message: %v\n", err)
+								}
+
+								if db.CountMaterialForSubject(parts[0]) == 0 {
+									if err := db.DeleteSubject(parts[0]); err != nil {
+										log.Printf("Error removing subject: %v\n", err)
+									} else {
+										log.Printf("Subject doesn't exist after removing material: %v\n", parts[0])
+									}
+								}
 							}
 
-							if db.CountMaterialForSubject(parts[0]) == 0 {
-								log.Printf("Subject doen't exist after removing material: %v\n", parts[0])
-							}
 						}
 					}
 					if isDeleteSubjectMode && chatID == adminMain {
 						subject := update.Message.Text
 						exists, err := db.SubjectExists(subject)
+						isDeleteSubjectMode = false
 						if err != nil {
 							log.Printf("Error checking if subject exists: %v\n", err)
 							msg := tgbotapi.NewMessage(chatID, "Ошибка при проверке предмета")
 							if _, err := bot.Send(msg); err != nil {
 								log.Printf("Error sending message: %v\n", err)
 							}
-							isDeleteSubjectMode = false
 						} else {
 							if !exists {
 								log.Printf("Subject doesn't exist: %v\n", subject)
@@ -259,10 +265,8 @@ func main() {
 								if _, err := bot.Send(msg); err != nil {
 									log.Printf("Error sending message: %v\n", err)
 								}
-								isDeleteSubjectMode = false
 							} else {
 								err = db.DeleteSubject(subject)
-								isDeleteSubjectMode = false
 								if err != nil {
 									log.Printf("Error removing subject: %v\n", err)
 									msg := tgbotapi.NewMessage(chatID, "Ошибка при удалении предмета")

@@ -26,7 +26,6 @@ func (db *DB) RemoveMaterial(subjectName string, controlElement string, elementN
 		log.Printf("failed to delete material: %v", err)
 		return err
 	}
-
 	return nil
 }
 
