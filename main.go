@@ -14,8 +14,6 @@ import (
 )
 
 var (
-	userSubject            = make(map[int64]string)
-	userControlElement     = make(map[int64]string)
 	isBroadcastMode        = make(map[int64]bool)
 	materialStep           = make(map[int64]string)
 	inProcessSubReq        = make(map[int64]bool)
@@ -162,7 +160,10 @@ func main() {
 							} else {
 								db.SetTempElementNumber(chatID, elementNumberForGet)
 								materialStep[chatID] = ""
-								functions.SendMaterialSearch(bot, chatID, db)
+								subject := db.GetTempSubject(chatID)
+								controlElement := db.GetTempControlElement(chatID)
+								number := db.GetTempElementNUmber(chatID)
+								functions.SendMaterial(bot, chatID, db, subject, controlElement, number)
 							}
 						}
 					}
@@ -253,7 +254,7 @@ func main() {
 							isDeleteSubjectMode = false
 						} else {
 							if !exists {
-								log.Printf("Subject doesn't exist: %v\n", err)
+								log.Printf("Subject doesn't exist: %v\n", subject)
 								msg := tgbotapi.NewMessage(chatID, "Предмет не существует")
 								if _, err := bot.Send(msg); err != nil {
 									log.Printf("Error sending message: %v\n", err)
@@ -261,6 +262,7 @@ func main() {
 								isDeleteSubjectMode = false
 							} else {
 								err = db.DeleteSubject(subject)
+								isDeleteSubjectMode = false
 								if err != nil {
 									log.Printf("Error removing subject: %v\n", err)
 									msg := tgbotapi.NewMessage(chatID, "Ошибка при удалении предмета")
@@ -275,7 +277,6 @@ func main() {
 										log.Printf("Error sending message: %v\n", err)
 									}
 								}
-								isDeleteSubjectMode = false
 							}
 						}
 					}

@@ -5,15 +5,14 @@ import (
 	"errors"
 	"github.com/lib/pq"
 	"log"
+	"slices"
 )
 
 // ----------------------- MATERIALS -----------------------
 
 func (db *DB) AddMaterial(subjectName string, controlElement string, elementNumber int, fileIDs []string, description string) error {
-	_, err := db.Exec(
-		"INSERT INTO Materials (SubjectName, ControlElement, ElementNumber, FileIDs, Description) "+
-			"VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING",
-		subjectName, controlElement, elementNumber, pq.Array(fileIDs), description)
+	query := "INSERT INTO Materials (SubjectName, ControlElement, ElementNumber, FileIDs, Description) VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING"
+	_, err := db.Exec(query, subjectName, controlElement, elementNumber, pq.Array(fileIDs), description)
 	return err
 }
 
@@ -78,17 +77,91 @@ func (db *DB) CountMaterialForSubject(subject string) int {
 	return count
 }
 
-func (db *DB) GetMaterialSearch(chatID int64) ([]string, string, error) {
+func (db *DB) GetMaterial(subject string, controlElement string, elementNumber int) ([]string, string, error) {
 	var fileIDs []string
 	var description string
-	err := db.QueryRow(
-		"SELECT FileIDs, Description FROM Materials WHERE SubjectName = $1 AND ControlElement = $2 AND ElementNumber = $3",
-		tempSubject[chatID], tempControlElement[chatID], tempElementNumber[chatID]).Scan(pq.Array(&fileIDs), &description)
+
+	query := `SELECT FileIDs, Description FROM Materials WHERE SubjectName = $1 AND ControlElement = $2 AND ElementNumber = $3`
+	err := db.QueryRow(query, subject, controlElement, elementNumber).Scan(pq.Array(&fileIDs), &description)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, "", nil
+			return nil, "", err
 		}
 		return nil, "", err
 	}
+
 	return fileIDs, description, nil
+}
+
+func (db *DB) GetControlElements(subject string) []string {
+	query := `
+		SELECT DISTINCT ControlElement 
+		FROM Materials 
+		WHERE SubjectName = $1
+	`
+	rows, err := db.Query(query, subject)
+	if err != nil {
+		log.Printf("Error querying control elements: %v\n", err)
+		return nil
+	}
+	defer func(rows *sql.Rows) {
+		err := rows.Close()
+		if err != nil {
+
+		}
+	}(rows)
+
+	var controlElements []string
+	for rows.Next() {
+		var controlElement string
+		if err = rows.Scan(&controlElement); err != nil {
+			log.Printf("Error scanning control element: %v\n", err)
+			continue
+		}
+		if !slices.Contains(controlElements, controlElement) {
+			controlElements = append(controlElements, controlElement)
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Printf("Error in control element rows iteration: %v\n", err)
+	}
+
+	return controlElements
+}
+
+func (db *DB) GetElementNumber(subject string, controlElement string) []int {
+	query := `
+		SELECT DISTINCT ElementNumber 
+		FROM Materials 
+		WHERE SubjectName = $1 AND ControlElement = $2
+	`
+	rows, err := db.Query(query, subject, controlElement)
+	if err != nil {
+		log.Printf("Error querying element number: %v\n", err)
+		return nil
+	}
+	defer func(rows *sql.Rows) {
+		err := rows.Close()
+		if err != nil {
+
+		}
+	}(rows)
+
+	var numbers []int
+	for rows.Next() {
+		var number int
+		if err = rows.Scan(&number); err != nil {
+			log.Printf("Error scanning element number: %v\n", err)
+			continue
+		}
+		numbers = append(numbers, number)
+
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Printf("Error in element number rows iteration: %v\n", err)
+	}
+
+	return numbers
 }

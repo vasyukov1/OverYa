@@ -2,12 +2,9 @@ package database
 
 import (
 	"database/sql"
-	"errors"
 	"fmt"
-	"github.com/lib/pq"
 	_ "github.com/lib/pq"
 	"log"
-	"slices"
 )
 
 const (
@@ -94,123 +91,4 @@ func (db *DB) CreateTables() error {
 		}
 	}
 	return nil
-}
-
-// -------------------- SUBJECTS --------------------
-
-func (db *DB) GetSubjects() []string {
-
-	var subjects []string
-	rows, err := db.Query("SELECT Name FROM Subjects")
-	if err != nil {
-		log.Printf("Failed to query subjects request: %v", err)
-		return nil
-	}
-	defer func(rows *sql.Rows) {
-		err = rows.Close()
-		if err != nil {
-			log.Fatalf("Failed to close rows: %v", err)
-		}
-	}(rows)
-	for rows.Next() {
-		var subject string
-		if err = rows.Scan(&subject); err != nil {
-			log.Printf("Failed to scan subject: %v", err)
-		}
-		subjects = append(subjects, subject)
-	}
-
-	if err = rows.Err(); err != nil {
-		log.Printf("Error iterating subjects requests: %v", err)
-	}
-	return subjects
-}
-
-func (db *DB) GetControlElements(subject string) []string {
-	query := `
-		SELECT DISTINCT ControlElement 
-		FROM Materials 
-		WHERE SubjectName = $1
-	`
-	rows, err := db.Query(query, subject)
-	if err != nil {
-		log.Printf("Error querying control elements: %v\n", err)
-		return nil
-	}
-	defer func(rows *sql.Rows) {
-		err := rows.Close()
-		if err != nil {
-
-		}
-	}(rows)
-
-	var controlElements []string
-	for rows.Next() {
-		var controlElement string
-		if err = rows.Scan(&controlElement); err != nil {
-			log.Printf("Error scanning control element: %v\n", err)
-			continue
-		}
-		if !slices.Contains(controlElements, controlElement) {
-			controlElements = append(controlElements, controlElement)
-		}
-	}
-
-	if err := rows.Err(); err != nil {
-		log.Printf("Error in control element rows iteration: %v\n", err)
-	}
-
-	return controlElements
-}
-
-func (db *DB) GetElementNumber(subject string, controlElement string) []int {
-	query := `
-		SELECT DISTINCT ElementNumber 
-		FROM Materials 
-		WHERE SubjectName = $1 AND ControlElement = $2
-	`
-	rows, err := db.Query(query, subject, controlElement)
-	if err != nil {
-		log.Printf("Error querying element number: %v\n", err)
-		return nil
-	}
-	defer func(rows *sql.Rows) {
-		err := rows.Close()
-		if err != nil {
-
-		}
-	}(rows)
-
-	var numbers []int
-	for rows.Next() {
-		var number int
-		if err = rows.Scan(&number); err != nil {
-			log.Printf("Error scanning element number: %v\n", err)
-			continue
-		}
-		numbers = append(numbers, number)
-
-	}
-
-	if err := rows.Err(); err != nil {
-		log.Printf("Error in element number rows iteration: %v\n", err)
-	}
-
-	return numbers
-}
-
-func (db *DB) GetMaterial(subject string, controlElement string, elementNumber int) ([]string, string, error) {
-	var fileIDs []string
-	var description string
-
-	query := `SELECT FileIDs, Description FROM Materials WHERE SubjectName = $1 AND ControlElement = $2 AND ElementNumber = $3`
-	err := db.QueryRow(query, subject, controlElement, elementNumber).Scan(pq.Array(&fileIDs), &description)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, "", err
-		}
-		return nil, "", err
-	}
-
-	return fileIDs, description, nil
 }
