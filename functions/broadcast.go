@@ -20,13 +20,77 @@ var (
 
 func HandleAdminBroadcast(bot *tgbotapi.BotAPI, message *tgbotapi.Message, update tgbotapi.Update, db *database.DB, telegramChannel int64, isBroadcastMode *map[int64]bool) {
 	chatID := message.Chat.ID
+
 	if update.CallbackQuery != nil {
 		HandleCallbackQuery(bot, update, db, telegramChannel, isBroadcastMode)
 		return
 	}
+
 	if message.Text != "" && broadcastMsg[chatID] == "" {
 		broadcastMsg[chatID] = message.Text
-		promptForAttachments(bot, chatID)
+		next := true
+
+		parts := strings.Split(broadcastMsg[chatID], " ")
+		if len(parts) == 3 {
+			subject := strings.TrimSpace(parts[0])
+			controlElement := strings.TrimSpace(parts[1])
+			number, err := strconv.Atoi(strings.TrimSpace(parts[2]))
+			if err != nil {
+				log.Printf("Error converting number to int: %v\n", err)
+				next = false
+			}
+
+			exists, err := db.SubjectExists(subject)
+			if err != nil {
+				log.Printf("Error checking subject existence: %v\n", err)
+			}
+
+			if !exists {
+				err = db.AddSubject(subject)
+				if err != nil {
+					log.Printf("Error adding subject: %v\n", err)
+					next = false
+				}
+				log.Printf("Added subject: %v\n", subject)
+			} else {
+				log.Printf("Subject exists: %v\n", subject)
+			}
+
+			if db.IsMaterialExists(subject, controlElement, number) {
+				//buttons := []tgbotapi.InlineKeyboardButton{
+				//	tgbotapi.NewInlineKeyboardButtonData("Да", fmt.Sprintf("edit_material_%v_%v_%v", subject, controlElement, number)),
+				//	tgbotapi.NewInlineKeyboardButtonData("Нет", "do_not_edit_material"),
+				//}
+				//keyboard := tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(buttons...))
+				//editMsg := tgbotapi.NewMessage(chatID, "Хотите редактировать его?")
+				//editMsg.ReplyMarkup = &keyboard
+				//if _, err := bot.Send(editMsg); err != nil {
+				//	log.Printf("Failed to send message with buttons to %v: %v", chatID, err)
+				//}
+				msg := tgbotapi.NewMessage(chatID, "")
+				msg.Text = fmt.Sprintf("Material `%v %v %v` is already existing", subject, controlElement, number)
+				if _, err := bot.Send(msg); err != nil {
+					log.Printf("Failed to send message to %v: %v", chatID, err)
+				}
+
+				broadcastMsg[chatID] = ""
+				(*isBroadcastMode)[chatID] = false
+				attachmentQueue[chatID] = nil
+
+				return
+			}
+			GoToMain(chatID, db, bot)
+		} else {
+			msg := tgbotapi.NewMessage(chatID, "")
+			msg.Text = fmt.Sprintf("Wrong name for material")
+			if _, err := bot.Send(msg); err != nil {
+				log.Printf("Failed to send message to %v: %v", chatID, err)
+			}
+			GoToMain(chatID, db, bot)
+		}
+		if next {
+			promptForAttachments(bot, chatID)
+		}
 		return
 	}
 	if message.Text == "/ok" {
@@ -42,7 +106,7 @@ func HandleAdminBroadcast(bot *tgbotapi.BotAPI, message *tgbotapi.Message, updat
 	handleMediaAttachments(chatID, message)
 }
 
-func broadcast(bot *tgbotapi.BotAPI, chatID int64, message string, attachments []interface{}, description string, db *database.DB, telegramChannel int64) {
+func broadcast(bot *tgbotapi.BotAPI, chatID int64, message string, attachments []interface{}, description string, db *database.DB, telegramChannel int64) bool {
 	subscribers := db.GetSubscribers()
 	var groupPhoto []interface{}
 	var groupDocument []interface{}
@@ -58,6 +122,17 @@ func broadcast(bot *tgbotapi.BotAPI, chatID int64, message string, attachments [
 			groupVideo = append(groupVideo, media)
 		}
 	}
+
+	parts := strings.Split(message, " ")
+	subject := strings.TrimSpace(parts[0])
+	controlElement := strings.TrimSpace(parts[1])
+	number, err := strconv.Atoi(strings.TrimSpace(parts[2]))
+	links := saveInChannel(bot, telegramChannel, attachments)
+	err = db.AddMaterial(subject, controlElement, number, links, description)
+	if err != nil {
+		return false
+	}
+
 	for chatID := range subscribers {
 		sendMediaGroup := func(mediaGroup []interface{}) {
 			if len(mediaGroup) > 0 {
@@ -102,7 +177,65 @@ func broadcast(bot *tgbotapi.BotAPI, chatID int64, message string, attachments [
 			log.Printf("Failed to send message to %v: %v", chatID, err)
 		}
 	}
+	return true
+}
 
+func promptForDescriptionChoice(bot *tgbotapi.BotAPI, chatID int64) {
+	msg := tgbotapi.NewMessage(chatID, "Do you want to add a description?")
+	buttons := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("Yes", "yes_description"),
+			tgbotapi.NewInlineKeyboardButtonData("No", "no_description"),
+		),
+	)
+	msg.ReplyMarkup = buttons
+	if _, err := bot.Send(msg); err != nil {
+		log.Printf("Failed to send message to %v: %v", chatID, err)
+	}
+}
+
+func promptForAttachments(bot *tgbotapi.BotAPI, chatID int64) {
+	msg := tgbotapi.NewMessage(chatID, "Attach media (photo, video, file) and send /ok when done.")
+	if _, err := bot.Send(msg); err != nil {
+		log.Printf("Failed to send message to %v: %v", chatID, err)
+	}
+}
+
+func sendBroadcast(bot *tgbotapi.BotAPI, chatID int64, db *database.DB, telegramChannel int64, isBroadcastMode *map[int64]bool) {
+	(*isBroadcastMode)[chatID] = false
+	if broadcast(bot, chatID, broadcastMsg[chatID], attachmentQueue[chatID], description[chatID], db, telegramChannel) {
+		description[chatID] = ""
+		broadcastMsg[chatID] = ""
+		attachmentQueue[chatID] = []interface{}{}
+		msg := tgbotapi.NewMessage(chatID, "Broadcast sent to all subscribers.")
+		if _, err := bot.Send(msg); err != nil {
+			log.Printf("Failed to send message to %v: %v", chatID, err)
+		}
+	} else {
+		msg := tgbotapi.NewMessage(chatID, "Broadcast is fail.")
+		if _, err := bot.Send(msg); err != nil {
+			log.Printf("Failed to send message to %v: %v", chatID, err)
+		}
+	}
+}
+
+func handleMediaAttachments(chatID int64, message *tgbotapi.Message) {
+	if message.Photo != nil && len(message.Photo) > 0 {
+		fileID := message.Photo[len(message.Photo)-1].FileID
+		photo := tgbotapi.NewInputMediaPhoto(tgbotapi.FileID(fileID))
+		attachmentQueue[chatID] = append(attachmentQueue[chatID], photo)
+	} else if message.Video != nil {
+		fileID := message.Video.FileID
+		video := tgbotapi.NewInputMediaVideo(tgbotapi.FileID(fileID))
+		attachmentQueue[chatID] = append(attachmentQueue[chatID], video)
+	} else if message.Document != nil {
+		fileID := message.Document.FileID
+		document := tgbotapi.NewInputMediaDocument(tgbotapi.FileID(fileID))
+		attachmentQueue[chatID] = append(attachmentQueue[chatID], document)
+	}
+}
+
+func saveInChannel(bot *tgbotapi.BotAPI, telegramChannel int64, attachments []interface{}) []string {
 	var links []string
 	for _, attachment := range attachments {
 		if attachment == nil {
@@ -138,117 +271,17 @@ func broadcast(bot *tgbotapi.BotAPI, chatID int64, message string, attachments [
 			links = append(links, "video:"+sentMsg.Video.FileID)
 		}
 	}
-	parts := strings.Split(message, " ")
-	if len(parts) == 3 {
-		subject := strings.TrimSpace(parts[0])
-		controlElement := strings.TrimSpace(parts[1])
-		number, err := strconv.Atoi(strings.TrimSpace(parts[2]))
-		if err != nil {
-			log.Printf("Error converting number to int: %v\n", err)
-		}
-
-		exists, err := db.SubjectExists(subject)
-		if err != nil {
-			log.Printf("Error checking subject existence: %v\n", err)
-			return
-		}
-
-		if !exists {
-			err = db.AddSubject(subject)
-			if err != nil {
-				log.Printf("Error adding subject: %v\n", err)
-				return
-			}
-			log.Printf("Added subject: %v\n", subject)
-		} else {
-			log.Printf("Subject exists: %v\n", subject)
-		}
-
-		if db.IsMaterialExists(subject, controlElement, number) {
-			msg := tgbotapi.NewMessage(chatID, "")
-			msg.Text = fmt.Sprintf("Material `%v %v %v` is already existing", subject, controlElement, number)
-			if _, err := bot.Send(msg); err != nil {
-				log.Printf("Failed to send message to %v: %v", chatID, err)
-			}
-			buttons := []tgbotapi.InlineKeyboardButton{
-				tgbotapi.NewInlineKeyboardButtonData("Да", fmt.Sprintf("edit_material_%v_%v_%v", subject, controlElement, number)),
-				tgbotapi.NewInlineKeyboardButtonData("Нет", "do_not_edit_material"),
-			}
-			keyboard := tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(buttons...))
-			editMsg := tgbotapi.NewMessage(chatID, "Хотите редактировать его?")
-			editMsg.ReplyMarkup = &keyboard
-			if _, err := bot.Send(editMsg); err != nil {
-				log.Printf("Failed to send message with buttons to %v: %v", chatID, err)
-			}
-		} else {
-			err = db.AddMaterial(subject, controlElement, number, links, description)
-			if err != nil {
-				return
-			}
-		}
-
-	} else {
-		log.Printf("Invalid message format: %v", len(parts))
-	}
+	return links
 }
 
-func promptForDescriptionChoice(bot *tgbotapi.BotAPI, chatID int64) {
-	msg := tgbotapi.NewMessage(chatID, "Do you want to add a description?")
-	buttons := tgbotapi.NewInlineKeyboardMarkup(
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("Yes", "yes_description"),
-			tgbotapi.NewInlineKeyboardButtonData("No", "no_description"),
-		),
-	)
-	msg.ReplyMarkup = buttons
-	if _, err := bot.Send(msg); err != nil {
-		log.Printf("Failed to send message to %v: %v", chatID, err)
-	}
-}
-
-func promptForAttachments(bot *tgbotapi.BotAPI, chatID int64) {
-	msg := tgbotapi.NewMessage(chatID, "Attach media (photo, video, file) and send /ok when done.")
-	if _, err := bot.Send(msg); err != nil {
-		log.Printf("Failed to send message to %v: %v", chatID, err)
-	}
-}
-
-func sendBroadcast(bot *tgbotapi.BotAPI, chatID int64, db *database.DB, telegramChannel int64, isBroadcastMode *map[int64]bool) {
-	(*isBroadcastMode)[chatID] = false
-	broadcast(bot, chatID, broadcastMsg[chatID], attachmentQueue[chatID], description[chatID], db, telegramChannel)
-	description[chatID] = ""
-	broadcastMsg[chatID] = ""
-	attachmentQueue[chatID] = []interface{}{}
-	msg := tgbotapi.NewMessage(chatID, "Broadcast sent to all subscribers.")
-	if _, err := bot.Send(msg); err != nil {
-		log.Printf("Failed to send message to %v: %v", chatID, err)
-	}
-}
-
-func handleMediaAttachments(chatID int64, message *tgbotapi.Message) {
-	if message.Photo != nil && len(message.Photo) > 0 {
-		fileID := message.Photo[len(message.Photo)-1].FileID
-		photo := tgbotapi.NewInputMediaPhoto(tgbotapi.FileID(fileID))
-		attachmentQueue[chatID] = append(attachmentQueue[chatID], photo)
-	} else if message.Video != nil {
-		fileID := message.Video.FileID
-		video := tgbotapi.NewInputMediaVideo(tgbotapi.FileID(fileID))
-		attachmentQueue[chatID] = append(attachmentQueue[chatID], video)
-	} else if message.Document != nil {
-		fileID := message.Document.FileID
-		document := tgbotapi.NewInputMediaDocument(tgbotapi.FileID(fileID))
-		attachmentQueue[chatID] = append(attachmentQueue[chatID], document)
-	}
-}
-
-func handleEditMaterial(bot *tgbotapi.BotAPI, chatID int64, db *database.DB, subject, controlElement string, number int) {
+func HandleEditMaterial(bot *tgbotapi.BotAPI, update tgbotapi.Update, chatID int64, db *database.DB, subject, controlElement string, number int) {
 	msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("Редактирование материала %v %v %v", subject, controlElement, number))
 	if _, err := bot.Send(msg); err != nil {
 		log.Printf("Failed to send message to %v: %v", chatID, err)
 	}
 
 	buttons := []tgbotapi.InlineKeyboardButton{
-		tgbotapi.NewInlineKeyboardButtonData("Название", fmt.Sprintf("edit_material_%v_%v_%v", subject, controlElement, number)),
+		tgbotapi.NewInlineKeyboardButtonData("Название", fmt.Sprintf("edit_name_%v_%v_%v", subject, controlElement, number)),
 		tgbotapi.NewInlineKeyboardButtonData("Медиа", fmt.Sprintf("edit_media_%v_%v_%v", subject, controlElement, number)),
 		tgbotapi.NewInlineKeyboardButtonData("Описание", fmt.Sprintf("edit_description_%v_%v_%v", subject, controlElement, number)),
 	}

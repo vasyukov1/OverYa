@@ -13,17 +13,6 @@ import (
 	"strings"
 )
 
-var (
-	isBroadcastMode        = make(map[int64]bool)
-	materialStep           = make(map[int64]string)
-	inProcessSubReq        = make(map[int64]bool)
-	inProcessAdminReq      = make(map[int64]bool)
-	isDeleteSubscriberMode = false
-	isDeleteAdminMode      = false
-	isDeleteMaterialMode   = false
-	isDeleteSubjectMode    = false
-)
-
 func main() {
 	cfg := config.LoadConfig()
 
@@ -66,12 +55,12 @@ func main() {
 			msg := tgbotapi.NewMessage(chatID, "")
 
 			if !db.IsSubscriber(chatID) {
-				if !inProcessSubReq[chatID] {
+				if !functions.InProcessSubReq[chatID] {
 					msg.Text = "If you want to become a subscriber, click on /become_subscriber"
 					switch update.Message.Command() {
 					case "become_subscriber":
 						msg.Text = "Your request is processed"
-						inProcessSubReq[chatID] = true
+						functions.InProcessSubReq[chatID] = true
 						subscribers.SendSubscribeRequest(bot, chatID, adminMain, db, update.Message.Chat)
 					}
 				} else {
@@ -79,8 +68,8 @@ func main() {
 				}
 
 			} else {
-				if db.IsAdmin(chatID) && isBroadcastMode[chatID] {
-					functions.HandleAdminBroadcast(bot, update.Message, update, db, telegramChannel, &isBroadcastMode)
+				if db.IsAdmin(chatID) && functions.IsBroadcastMode[chatID] {
+					functions.HandleAdminBroadcast(bot, update.Message, update, db, telegramChannel, &functions.IsBroadcastMode)
 					continue
 				}
 
@@ -89,77 +78,97 @@ func main() {
 					msg.Text = "Hello, HSE Student!"
 				case "help":
 					msg.Text = "Usage: /start, /help, /broadcast"
+				case "go_main":
+					functions.GoToMain(chatID, db, bot)
 				case "broadcast":
 					if db.IsAdmin(chatID) {
 						msg.Text = "Please enter the subject and control element, e.g., 'Algebra lecture 2'."
-						isBroadcastMode[chatID] = true
+						functions.IsBroadcastMode[chatID] = true
 					} else {
 						msg.Text = "You are not an admin"
 					}
 				case "get_materials_search":
-					materialStep[chatID] = "awaiting_subject"
+					functions.MaterialStep[chatID] = "awaiting_subject"
 					msg.Text = "Please enter the subject name"
 				case "delete_subscriber":
 					if chatID == adminMain {
 						msg.Text = "Send subscriber's ID"
-						isDeleteSubscriberMode = true
+						functions.IsDeleteSubscriberMode = true
 					}
 				case "delete_admin":
 					if chatID == adminMain {
 						msg.Text = "Send admin ID"
-						isDeleteAdminMode = true
+						functions.IsDeleteAdminMode = true
 					}
 				case "become_admin":
 					if db.IsAdmin(chatID) {
 						msg.Text = "You are already an admin"
 					} else {
-						if !inProcessAdminReq[chatID] {
+						if !functions.InProcessAdminReq[chatID] {
 							msg.Text = "Your admin request is processed"
-							inProcessAdminReq[chatID] = true
+							functions.InProcessAdminReq[chatID] = true
 							admins.SendAdminRequest(bot, chatID, adminMain, db, update.Message.Chat)
 						} else {
 							msg.Text = "Your admin request already is processed"
 						}
 					}
-				case "requests":
-					subscribers.HandleSubscriberRequests(bot, chatID, db)
-				case "admin_requests":
-					admins.HandleAdminRequests(bot, update.Message, chatID, db)
-				case "get_admins_info":
-					admins.HandleGetAdminsInfo(bot, chatID, db)
+				case "subscribers":
+					if chatID == adminMain {
+						subscribers.GetSubscribers(bot, update, chatID, db, 0)
+					} else {
+						msg.Text = "You aren't an admin"
+					}
+				case "admins":
+					if chatID == adminMain {
+						admins.GetAdmins(bot, update, chatID, db, 0)
+					} else {
+						msg.Text = "You aren't an admin"
+					}
+				case "requests_subscriber":
+					subscribers.HandleSubscriberRequests(bot, update, chatID, db, 0)
+				case "requests_admin":
+					admins.HandleAdminRequests(bot, update, chatID, db, 0)
 				case "get_materials":
 					functions.HandleGetSubjects(bot, update, chatID, db, 0)
 				case "delete_material":
 					if chatID == adminMain {
 						msg.Text = "Send subject, control element, element number (ex. 'Алгебра КР 1')"
-						isDeleteMaterialMode = true
+						functions.IsDeleteMaterialMode = true
 					}
 				case "delete_subject":
 					if chatID == adminMain {
 						msg.Text = "Send subject name"
-						isDeleteSubjectMode = true
+						functions.IsDeleteSubjectMode = true
 					}
+				case "count_subscribers":
+					countSubscribers := db.CountSubscribers()
+					msg.Text = fmt.Sprintf("There are %v of subscribers!", countSubscribers)
+				case "count_admins":
+					countAdmins := db.CountAdmins()
+					msg.Text = fmt.Sprintf("There are %v of admins!", countAdmins)
+				default:
+					msg.Text = "Command not found"
 				}
 
 				if update.Message.Command() == "" {
 
-					if materialStep[chatID] != "" {
-						switch materialStep[chatID] {
+					if functions.MaterialStep[chatID] != "" {
+						switch functions.MaterialStep[chatID] {
 						case "awaiting_subject":
 							msg.Text = "Please enter the control element (e.g., lecture, seminar)"
 							db.SetTempSubject(chatID, update.Message.Text)
-							materialStep[chatID] = "awaiting_control_element"
+							functions.MaterialStep[chatID] = "awaiting_control_element"
 						case "awaiting_control_element":
 							msg.Text = "Please enter the number of element"
 							db.SetTempControlElement(chatID, update.Message.Text)
-							materialStep[chatID] = "awaiting_element_number"
+							functions.MaterialStep[chatID] = "awaiting_element_number"
 						case "awaiting_element_number":
 							elementNumberForGet, err := strconv.Atoi(update.Message.Text)
 							if err != nil {
 								msg.Text = "This element does not exist"
 							} else {
 								db.SetTempElementNumber(chatID, elementNumberForGet)
-								materialStep[chatID] = ""
+								functions.MaterialStep[chatID] = ""
 								subject := db.GetTempSubject(chatID)
 								controlElement := db.GetTempControlElement(chatID)
 								number := db.GetTempElementNUmber(chatID)
@@ -167,7 +176,8 @@ func main() {
 							}
 						}
 					}
-					if isDeleteSubscriberMode && chatID == adminMain {
+
+					if functions.IsDeleteSubscriberMode && chatID == adminMain {
 						deleteID, err := strconv.Atoi(strings.TrimSpace(update.Message.Text))
 						if err != nil {
 							log.Printf("Error converting delete_subscriber_id to int: %v\n", err)
@@ -178,11 +188,11 @@ func main() {
 							} else {
 								msg.Text = "We can't delete this subscriber"
 							}
-							isDeleteSubscriberMode = false
+							functions.IsDeleteSubscriberMode = false
 						}
 
 					}
-					if isDeleteAdminMode && chatID == adminMain {
+					if functions.IsDeleteAdminMode && chatID == adminMain {
 						deleteID, err := strconv.Atoi(strings.TrimSpace(update.Message.Text))
 						if err != nil {
 							log.Printf("Error converting delete_admin_id to int: %v\n", err)
@@ -193,15 +203,15 @@ func main() {
 							} else {
 								msg.Text = "We can't delete this admin"
 							}
-							isDeleteAdminMode = false
+							functions.IsDeleteAdminMode = false
 						}
 
 					}
-					if isDeleteMaterialMode && chatID == adminMain {
+					if functions.IsDeleteMaterialMode && chatID == adminMain {
 						parts := strings.Split(strings.TrimSpace(update.Message.Text), " ")
 						if len(parts) != 3 {
 							log.Printf("Error converting parts count: %v\n", err)
-							isDeleteMaterialMode = false
+							functions.IsDeleteMaterialMode = false
 							msg := tgbotapi.NewMessage(chatID, "Неверное название для удаления материала.")
 							if _, err := bot.Send(msg); err != nil {
 								log.Printf("Error sending message: %v\n", err)
@@ -221,7 +231,7 @@ func main() {
 									log.Printf("Error sending message: %v\n", err)
 								}
 							}
-							isDeleteMaterialMode = false
+							functions.IsDeleteMaterialMode = false
 							err = db.RemoveMaterial(parts[0], parts[1], number)
 							if err != nil {
 								log.Printf("Error removing material: %v\n", err)
@@ -248,10 +258,10 @@ func main() {
 
 						}
 					}
-					if isDeleteSubjectMode && chatID == adminMain {
+					if functions.IsDeleteSubjectMode && chatID == adminMain {
 						subject := update.Message.Text
 						exists, err := db.SubjectExists(subject)
-						isDeleteSubjectMode = false
+						functions.IsDeleteSubjectMode = false
 						if err != nil {
 							log.Printf("Error checking if subject exists: %v\n", err)
 							msg := tgbotapi.NewMessage(chatID, "Ошибка при проверке предмета")
@@ -300,18 +310,18 @@ func main() {
 			if strings.HasPrefix(callbackData, "request_admin_") ||
 				strings.HasPrefix(callbackData, "accept_admin_") ||
 				strings.HasPrefix(callbackData, "reject_admin_") {
-				admins.HandleAdminRequestCallback(bot, update.CallbackQuery, db, &inProcessAdminReq)
+				admins.HandleAdminRequestCallback(bot, update.CallbackQuery, db, &functions.InProcessAdminReq)
 			} else if strings.HasPrefix(callbackData, "request_subscriber_") ||
 				strings.HasPrefix(callbackData, "accept_subscriber_") ||
 				strings.HasPrefix(callbackData, "reject_subscriber_") {
-				subscribers.HandleRequestCallback(bot, update.CallbackQuery, db, &inProcessSubReq)
+				subscribers.HandleRequestCallback(bot, update.CallbackQuery, db, &functions.InProcessSubReq)
 			} else if strings.HasPrefix(callbackData, "get_admin_info_") {
 				admins.HandleAdminInfoCallback(bot, update.CallbackQuery, db)
 			} else {
-				functions.HandleCallbackQuery(bot, update, db, telegramChannel, &isBroadcastMode)
+				functions.HandleCallbackQuery(bot, update, db, telegramChannel, &functions.IsBroadcastMode)
 			}
 		} else if update.CallbackQuery != nil && db.IsSubscriber(update.CallbackQuery.From.ID) {
-			functions.HandleCallbackQuery(bot, update, db, telegramChannel, &isBroadcastMode)
+			functions.HandleCallbackQuery(bot, update, db, telegramChannel, &functions.IsBroadcastMode)
 		}
 	}
 }

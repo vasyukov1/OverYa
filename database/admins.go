@@ -74,6 +74,16 @@ func (db *DB) GetAdminInfo(adminID int64) (string, error) {
 	return userInfo, nil
 }
 
+func (db *DB) CountAdmins() int {
+	var count int
+	err := db.QueryRow("SELECT COUNT(*) FROM admins").Scan(&count)
+	if err != nil {
+		log.Printf("Failed to count admins: %v", err)
+		return 0
+	}
+	return count
+}
+
 // ----------------------- ADMIN REQUEST ------------------------
 
 func (db *DB) AddAdminRequest(chatID int64, firstName, lastName, userName string) error {

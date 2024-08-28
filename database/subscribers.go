@@ -56,6 +56,16 @@ func (db *DB) GetSubscribers() map[int64]bool {
 	return subscribers
 }
 
+func (db *DB) CountSubscribers() int {
+	var count int
+	err := db.QueryRow("SELECT COUNT(*) FROM Subscribers").Scan(&count)
+	if err != nil {
+		log.Printf("Failed to count subscribers: %v", err)
+		return 0
+	}
+	return count
+}
+
 // ----------------------- SUBSCRIBER REQUEST ------------------------
 
 func (db *DB) AddSubscriberRequest(chatID int64, firstName, lastName, userName string) error {

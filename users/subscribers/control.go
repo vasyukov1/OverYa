@@ -13,7 +13,9 @@ func AddSubscriber(bot *tgbotapi.BotAPI, chatID int64, db *database.DB) {
 	db.AddSubscriber(chatID)
 	log.Printf("Added subscriber %v", chatID)
 	msg := tgbotapi.NewMessage(chatID, "You are now a subscriber!")
-	bot.Send(msg)
+	if _, err := bot.Send(msg); err != nil {
+		log.Printf("Error sending message: %v", err)
+	}
 }
 
 func SendSubscribeRequest(bot *tgbotapi.BotAPI, chatID int64, mainAdmin int64, db *database.DB, chat *tgbotapi.Chat) {
@@ -23,11 +25,15 @@ func SendSubscribeRequest(bot *tgbotapi.BotAPI, chatID int64, mainAdmin int64, d
 	if err := db.AddSubscriberRequest(chatID, firstName, lastName, userName); err != nil {
 		log.Printf("Send subscribe request error: %v", err)
 		msg := tgbotapi.NewMessage(chatID, "We have problem with your request, sorry")
-		bot.Send(msg)
+		if _, err := bot.Send(msg); err != nil {
+			log.Printf("Error sending message: %v", err)
+		}
 	} else {
 		msg := tgbotapi.NewMessage(mainAdmin, "")
-		msg.Text = fmt.Sprintf("You have new subscriber request! \nAll /requests: %v", db.CountSubscriberRequest())
-		bot.Send(msg)
+		msg.Text = fmt.Sprintf("You have new subscriber request! \nAll /requests_subscriber: %v", db.CountSubscriberRequest())
+		if _, err := bot.Send(msg); err != nil {
+			log.Printf("Error sending message: %v", err)
+		}
 	}
 }
 
@@ -36,21 +42,102 @@ func DeleteSubscriber(bot *tgbotapi.BotAPI, chatID int64, mainAdmin int64, db *d
 		log.Printf("Can't delete %v, is not a subscriber", chatID)
 		msg := tgbotapi.NewMessage(mainAdmin, "")
 		msg.Text = "It is not a subscriber."
-		bot.Send(msg)
+		if _, err := bot.Send(msg); err != nil {
+			log.Printf("Error sending message: %v", err)
+		}
 		return false
 	}
 	if db.IsAdmin(chatID) {
 		db.DeleteAdmin(chatID)
 		msg := tgbotapi.NewMessage(chatID, "*You aren't now an admin*")
-		bot.Send(msg)
+		if _, err := bot.Send(msg); err != nil {
+			log.Printf("Error sending message: %v", err)
+		}
 	}
 	db.DeleteSubscriber(chatID)
 	msg := tgbotapi.NewMessage(chatID, "*You aren't now a subscriber(*")
-	bot.Send(msg)
+	if _, err := bot.Send(msg); err != nil {
+		log.Printf("Error sending message: %v", err)
+	}
 	return true
 }
 
-func HandleSubscriberRequests(bot *tgbotapi.BotAPI, chatID int64, db *database.DB) {
+func GetSubscribers(bot *tgbotapi.BotAPI, update tgbotapi.Update, adminID int64, db *database.DB, page int) {
+	const itemsPerPageFirstLast = 9
+	const itemsPerPageMiddle = 8
+
+	if !db.IsAdmin(adminID) {
+		msg := tgbotapi.NewMessage(adminID, "У вас нет прав администратора.")
+		if _, err := bot.Send(msg); err != nil {
+			log.Printf("Failed to send message to %v: %v", adminID, err)
+		}
+		return
+	}
+
+	subscribers := db.GetSubscribers()
+	if len(subscribers) == 0 {
+		msg := tgbotapi.NewMessage(adminID, "Подписчиков нет.")
+		if _, err := bot.Send(msg); err != nil {
+			log.Printf("Failed to send message to %v: %v", adminID, err)
+		}
+		return
+	}
+	var subscriberIDs []int64
+	for id := range subscribers {
+		subscriberIDs = append(subscriberIDs, id)
+	}
+
+	var startIndex, endIndex int
+	if page == 0 {
+		startIndex = 0
+		endIndex = itemsPerPageFirstLast
+	} else {
+		startIndex = itemsPerPageFirstLast + (page-1)*itemsPerPageMiddle
+		endIndex = startIndex + itemsPerPageMiddle
+	}
+
+	if endIndex > len(subscribers) {
+		endIndex = len(subscribers)
+	}
+
+	var buttons [][]tgbotapi.InlineKeyboardButton
+	for _, subscriber := range subscriberIDs[startIndex:endIndex] {
+		button := tgbotapi.NewInlineKeyboardButtonData(
+			fmt.Sprintf("%d", subscriber), fmt.Sprintf("subscriber_%d", subscriber))
+		buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(button))
+	}
+
+	var navigationButtons []tgbotapi.InlineKeyboardButton
+	if page > 0 {
+		navigationButtons = append(navigationButtons, tgbotapi.NewInlineKeyboardButtonData("⬅️ Назад", fmt.Sprintf("page_subscribers_%d", page-1)))
+	}
+	if endIndex < len(subscribers) {
+		navigationButtons = append(navigationButtons, tgbotapi.NewInlineKeyboardButtonData("Дальше ➡️", fmt.Sprintf("page_subscribers_%d", page+1)))
+	}
+	if len(navigationButtons) > 0 {
+		buttons = append(buttons, navigationButtons)
+	}
+
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons...)
+	if update.CallbackQuery == nil {
+		msg := tgbotapi.NewMessage(adminID, "Список подписчиков:")
+		msg.ReplyMarkup = keyboard
+		if _, err := bot.Send(msg); err != nil {
+			log.Printf("Failed to send message to %v: %v", adminID, err)
+		}
+	} else {
+		editMsg := tgbotapi.NewEditMessageText(adminID, update.CallbackQuery.Message.MessageID, "Список подписчиков:")
+		editMsg.ReplyMarkup = &keyboard
+		if _, err := bot.Send(editMsg); err != nil {
+			log.Printf("Failed to edit message for %v: %v", adminID, err)
+		}
+	}
+}
+
+func HandleSubscriberRequests(bot *tgbotapi.BotAPI, update tgbotapi.Update, chatID int64, db *database.DB, page int) {
+	const itemsPerPageFirstLast = 9
+	const itemsPerPageMiddle = 8
+
 	if !db.IsAdmin(chatID) {
 		msg := tgbotapi.NewMessage(chatID, "У вас нет прав администратора.")
 		if _, err := bot.Send(msg); err != nil {
@@ -70,25 +157,57 @@ func HandleSubscriberRequests(bot *tgbotapi.BotAPI, chatID int64, db *database.D
 	}
 
 	if len(requests) == 0 {
-		msg := tgbotapi.NewMessage(chatID, "There are no requests.")
+		msg := tgbotapi.NewMessage(chatID, "Заявок на подписку нет.")
 		if _, err := bot.Send(msg); err != nil {
 			log.Printf("Failed to send message to %v: %v", chatID, err)
 		}
 		return
 	}
 
-	var rows [][]tgbotapi.InlineKeyboardButton
-	for _, request := range requests {
-		button := tgbotapi.NewInlineKeyboardButtonData(
-			fmt.Sprintf("%d", request), fmt.Sprintf("request_subscriber_%d", request))
-		rows = append(rows, tgbotapi.NewInlineKeyboardRow(button))
+	var startIndex, endIndex int
+	if page == 0 {
+		startIndex = 0
+		endIndex = itemsPerPageFirstLast
+	} else {
+		startIndex = itemsPerPageFirstLast + (page-1)*itemsPerPageMiddle
+		endIndex = startIndex + itemsPerPageMiddle
 	}
 
-	msg := tgbotapi.NewMessage(chatID, "Subscriber Requests:")
-	keyboard := tgbotapi.NewInlineKeyboardMarkup(rows...)
-	msg.ReplyMarkup = keyboard
-	if _, err := bot.Send(msg); err != nil {
-		log.Printf("Failed to send message to %v: %v", chatID, err)
+	if endIndex > len(requests) {
+		endIndex = len(requests)
+	}
+
+	var buttons [][]tgbotapi.InlineKeyboardButton
+	for _, request := range requests[startIndex:endIndex] {
+		button := tgbotapi.NewInlineKeyboardButtonData(
+			fmt.Sprintf("%d", request), fmt.Sprintf("request_subscriber_%d", request))
+		buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(button))
+	}
+
+	var navigationButtons []tgbotapi.InlineKeyboardButton
+	if page > 0 {
+		navigationButtons = append(navigationButtons, tgbotapi.NewInlineKeyboardButtonData("⬅️ Назад", fmt.Sprintf("page_subscriber_requests%d", page-1)))
+	}
+	if endIndex < len(requests) {
+		navigationButtons = append(navigationButtons, tgbotapi.NewInlineKeyboardButtonData("Дальше ➡️", fmt.Sprintf("page_subscriber_requests%d", page+1)))
+	}
+	if len(navigationButtons) > 0 {
+		buttons = append(buttons, navigationButtons)
+	}
+
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons...)
+	if update.CallbackQuery == nil {
+		msg := tgbotapi.NewMessage(chatID, "Заявки на подписку:")
+		msg.ReplyMarkup = keyboard
+		if _, err := bot.Send(msg); err != nil {
+			log.Printf("Failed to send message to %v: %v", chatID, err)
+		}
+	} else {
+		editMsg := tgbotapi.NewEditMessageText(chatID, update.CallbackQuery.Message.MessageID, "Заявки на подписку:")
+		editMsg.ReplyMarkup = &keyboard
+		if _, err := bot.Send(editMsg); err != nil {
+			log.Printf("Failed to edit message for %v: %v", chatID, err)
+		}
 	}
 }
 

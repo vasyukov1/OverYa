@@ -164,3 +164,20 @@ func (db *DB) GetElementNumber(subject string, controlElement string) []int {
 
 	return numbers
 }
+
+// -------------------- EDITION --------------------
+
+// EditName has some problems ??
+func (db *DB) EditName(subject string, controlElement string, number int, old []string) error {
+	query := `
+		UPDATE Materials
+		SET SubjectName = $1, ControlElement = $2, ElementNumber = $3
+		WHERE SubjectName = $4 AND ControlElement = $5 AND ElementNumber = $6
+	`
+	_, err := db.Exec(query, subject, controlElement, number, old[0], old[1], old[2])
+	if err != nil {
+		log.Println("Ошибка выполнения запроса:", err)
+		return err
+	}
+	return nil
+}

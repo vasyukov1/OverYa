@@ -6,8 +6,6 @@ import (
 	"github.com/vasyukov1/Overbot/database"
 	"log"
 	"sort"
-	"strconv"
-	"strings"
 )
 
 func HandleGetSubjects(bot *tgbotapi.BotAPI, update tgbotapi.Update, chatID int64, db *database.DB, page int) {
@@ -45,10 +43,10 @@ func HandleGetSubjects(bot *tgbotapi.BotAPI, update tgbotapi.Update, chatID int6
 
 	var navigationButtons []tgbotapi.InlineKeyboardButton
 	if page > 0 {
-		navigationButtons = append(navigationButtons, tgbotapi.NewInlineKeyboardButtonData("⬅️ Назад", fmt.Sprintf("subjects_page_%d", page-1)))
+		navigationButtons = append(navigationButtons, tgbotapi.NewInlineKeyboardButtonData("⬅️ Назад", fmt.Sprintf("page_subjects_%d", page-1)))
 	}
 	if endIndex < len(subjects) {
-		navigationButtons = append(navigationButtons, tgbotapi.NewInlineKeyboardButtonData("Дальше ➡️", fmt.Sprintf("subjects_page_%d", page+1)))
+		navigationButtons = append(navigationButtons, tgbotapi.NewInlineKeyboardButtonData("Дальше ➡️", fmt.Sprintf("page_subjects_%d", page+1)))
 	}
 	if len(navigationButtons) > 0 {
 		buttons = append(buttons, navigationButtons)
@@ -105,10 +103,10 @@ func handleGetControlElements(bot *tgbotapi.BotAPI, update tgbotapi.Update, chat
 
 	var navigationButtons []tgbotapi.InlineKeyboardButton
 	if page > 0 {
-		navigationButtons = append(navigationButtons, tgbotapi.NewInlineKeyboardButtonData("⬅️ Назад", fmt.Sprintf("controls_page_%d", page-1)))
+		navigationButtons = append(navigationButtons, tgbotapi.NewInlineKeyboardButtonData("⬅️ Назад", fmt.Sprintf("page_controls_%d", page-1)))
 	}
 	if endIndex < len(controlElements) {
-		navigationButtons = append(navigationButtons, tgbotapi.NewInlineKeyboardButtonData("Дальше ➡️", fmt.Sprintf("controls_page_%d", page+1)))
+		navigationButtons = append(navigationButtons, tgbotapi.NewInlineKeyboardButtonData("Дальше ➡️", fmt.Sprintf("page_controls_%d", page+1)))
 	}
 	if len(navigationButtons) > 0 {
 		buttons = append(buttons, navigationButtons)
@@ -159,10 +157,10 @@ func handleGetElementNumbers(bot *tgbotapi.BotAPI, update tgbotapi.Update, chatI
 
 	var navigationButtons []tgbotapi.InlineKeyboardButton
 	if page > 0 {
-		navigationButtons = append(navigationButtons, tgbotapi.NewInlineKeyboardButtonData("⬅️ Назад", fmt.Sprintf("elements_page_%d", page-1)))
+		navigationButtons = append(navigationButtons, tgbotapi.NewInlineKeyboardButtonData("⬅️ Назад", fmt.Sprintf("page_elements_%d", page-1)))
 	}
 	if endIndex < len(elementNumbers) {
-		navigationButtons = append(navigationButtons, tgbotapi.NewInlineKeyboardButtonData("Дальше ➡️", fmt.Sprintf("elements_page_%d", page+1)))
+		navigationButtons = append(navigationButtons, tgbotapi.NewInlineKeyboardButtonData("Дальше ➡️", fmt.Sprintf("page_elements_%d", page+1)))
 	}
 	navigationButtons = append(navigationButtons, tgbotapi.NewInlineKeyboardButtonData("Back", "back_to_controls"))
 	buttons = append(buttons, navigationButtons)
@@ -173,140 +171,4 @@ func handleGetElementNumbers(bot *tgbotapi.BotAPI, update tgbotapi.Update, chatI
 	if _, err := bot.Send(editMsg); err != nil {
 		log.Printf("Edit message error to %v: %v", chatID, err)
 	}
-}
-
-func HandleCallbackQuery(bot *tgbotapi.BotAPI, update tgbotapi.Update, db *database.DB, telegramChannel int64, isBroadcastMode *map[int64]bool) {
-	chatID := update.CallbackQuery.Message.Chat.ID
-	callbackData := update.CallbackQuery.Data
-
-	if db.IsAdmin(chatID) {
-		switch callbackData {
-		case "yes_description":
-			msg := tgbotapi.NewMessage(chatID, "Please provide the description")
-			if _, err := bot.Send(msg); err != nil {
-				log.Printf("Failed to send message to %v: %v", chatID, err)
-			}
-			isDescriptionMode[chatID] = true
-		case "no_description":
-			sendBroadcast(bot, chatID, db, telegramChannel, isBroadcastMode)
-		}
-	}
-
-	if strings.HasPrefix(callbackData, "subjects_page_") {
-		pageStr := strings.TrimPrefix(callbackData, "subjects_page_")
-		page, err := strconv.Atoi(pageStr)
-		if err != nil {
-			log.Printf("Invalid page number: %v", err)
-			return
-		}
-		HandleGetSubjects(bot, update, chatID, db, page)
-		answer := tgbotapi.NewCallback(update.CallbackQuery.ID, "")
-		if _, err := bot.Request(answer); err != nil {
-			log.Printf("Error sending callback response: %v", err)
-		}
-
-	} else if strings.HasPrefix(callbackData, "subject_") {
-		subject := strings.TrimPrefix(callbackData, "subject_")
-		userSubject[chatID] = subject
-		log.Printf("User %v choose subject: %v", chatID, subject)
-		handleGetControlElements(bot, update, chatID, db, subject, 0)
-
-	} else if strings.HasPrefix(callbackData, "controls_page_") {
-		subject := userSubject[chatID]
-		pageStr := strings.TrimPrefix(callbackData, "controls_page_")
-		page, err := strconv.Atoi(pageStr)
-		if err != nil {
-			log.Printf("Invalid page number: %v", err)
-			return
-		}
-		handleGetControlElements(bot, update, chatID, db, subject, page)
-		answer := tgbotapi.NewCallback(update.CallbackQuery.ID, "")
-		if _, err := bot.Request(answer); err != nil {
-			log.Printf("Error sending callback response: %v", err)
-		}
-
-	} else if strings.HasPrefix(callbackData, "control_") {
-		controlElement := strings.TrimPrefix(callbackData, "control_")
-		userControlElement[chatID] = controlElement
-		log.Printf("User %v choose control element: %v", chatID, controlElement)
-		handleGetElementNumbers(bot, update, chatID, db, userSubject[chatID], controlElement, 0)
-
-	} else if strings.HasPrefix(callbackData, "elements_page_") {
-		controlElement := userControlElement[chatID]
-		pageStr := strings.TrimPrefix(callbackData, "elements_page_")
-		page, err := strconv.Atoi(pageStr)
-		if err != nil {
-			log.Printf("Invalid page number: %v", err)
-			return
-		}
-		handleGetElementNumbers(bot, update, chatID, db, userSubject[chatID], controlElement, page)
-		answer := tgbotapi.NewCallback(update.CallbackQuery.ID, "")
-		if _, err := bot.Request(answer); err != nil {
-			log.Printf("Error sending callback response: %v", err)
-		}
-
-	} else if strings.HasPrefix(callbackData, "number_") {
-		numberStr := strings.TrimPrefix(callbackData, "number_")
-		number, err := strconv.Atoi(numberStr)
-		if err != nil {
-			log.Println("Invalid number:", numberStr)
-			return
-		}
-		log.Printf("User %v choose element number: %v", chatID, number)
-		subject := userSubject[chatID]
-		controlElement := userControlElement[chatID]
-
-		deleteMsg := tgbotapi.NewDeleteMessage(chatID, update.CallbackQuery.Message.MessageID)
-		if _, err := bot.Send(deleteMsg); err != nil {
-			if !isUnmarshalBoolError(err) {
-				log.Printf("Failed to delete message with button to %v: %v", chatID, err)
-			}
-		}
-
-		SendMaterial(bot, chatID, db, subject, controlElement, number)
-
-	} else if callbackData == "back_to_subjects" {
-		HandleGetSubjects(bot, update, chatID, db, 0)
-
-	} else if callbackData == "back_to_controls" {
-		subject := userSubject[chatID]
-		handleGetControlElements(bot, update, chatID, db, subject, 0)
-
-	} else if strings.HasPrefix(callbackData, "edit_material_") {
-		parts := strings.Split(callbackData, "_")
-		if len(parts) != 5 {
-			log.Printf("Invalid callback data: %v", callbackData)
-			return
-		}
-		subject := parts[2]
-		controlElement := parts[3]
-		number, err := strconv.Atoi(parts[4])
-		if err != nil {
-			log.Printf("Invalid material number: %v", parts[4])
-			return
-		}
-
-		handleEditMaterial(bot, chatID, db, subject, controlElement, number)
-
-	} else if callbackData == "do_not_edit_material" {
-		msg := tgbotapi.NewMessage(chatID, "Рассылка отклонена.")
-		if _, err := bot.Send(msg); err != nil {
-			log.Printf("Failed to send message to %v: %v", chatID, err)
-		}
-	} else if strings.HasPrefix(callbackData, "dit_material_") {
-
-	} else if strings.HasPrefix(callbackData, "edit_media_") {
-
-	} else if strings.HasPrefix(callbackData, "edit_description_") {
-
-	}
-
-	callback := tgbotapi.NewCallback(update.CallbackQuery.ID, "")
-	if _, err := bot.Request(callback); err != nil {
-		log.Printf("Callback error: %v", err)
-	}
-}
-
-func isUnmarshalBoolError(err error) bool {
-	return strings.Contains(err.Error(), "json: cannot unmarshal bool into Go value of type tgbotapi.Message")
 }

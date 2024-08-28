@@ -13,7 +13,9 @@ func AddAdmin(bot *tgbotapi.BotAPI, chatID int64, db *database.DB) {
 	db.AddAdmin(chatID)
 	log.Printf("Added admin %v", chatID)
 	msg := tgbotapi.NewMessage(chatID, "You are now an admin!")
-	bot.Send(msg)
+	if _, err := bot.Send(msg); err != nil {
+		log.Printf("Send admin request error: %v", err)
+	}
 }
 
 func SendAdminRequest(bot *tgbotapi.BotAPI, chatID int64, mainAdmin int64, db *database.DB, chat *tgbotapi.Chat) {
@@ -23,11 +25,15 @@ func SendAdminRequest(bot *tgbotapi.BotAPI, chatID int64, mainAdmin int64, db *d
 	if err := db.AddAdminRequest(chatID, firstName, lastName, userName); err != nil {
 		log.Printf("Send admin request error: %v", err)
 		msg := tgbotapi.NewMessage(chatID, "We have problem with your admin request, sorry")
-		bot.Send(msg)
+		if _, err := bot.Send(msg); err != nil {
+			log.Printf("Send admin request error: %v", err)
+		}
 	} else {
 		msg := tgbotapi.NewMessage(mainAdmin, "")
-		msg.Text = fmt.Sprintf("You have new admin request! \nAll /admin_requests: %v", db.CountAdminRequest())
-		bot.Send(msg)
+		msg.Text = fmt.Sprintf("You have new admin request! \nAll /requests_admin: %v", db.CountAdminRequest())
+		if _, err := bot.Send(msg); err != nil {
+			log.Printf("Send admin request error: %v", err)
+		}
 	}
 }
 
@@ -36,18 +42,25 @@ func DeleteAdmin(bot *tgbotapi.BotAPI, chatID int64, mainAdmin int64, db *databa
 		log.Printf("Can't delete %v, is not an admin", chatID)
 		msg := tgbotapi.NewMessage(mainAdmin, "")
 		msg.Text = "You are not an admin."
-		bot.Send(msg)
+		if _, err := bot.Send(msg); err != nil {
+			log.Printf("Send admin request error: %v", err)
+		}
 		return false
 	}
 	db.DeleteAdmin(chatID)
 	msg := tgbotapi.NewMessage(chatID, "You aren't now an admin(")
-	bot.Send(msg)
+	if _, err := bot.Send(msg); err != nil {
+		log.Printf("Send admin request error: %v", err)
+	}
 	return true
 }
 
-func HandleAdminRequests(bot *tgbotapi.BotAPI, message *tgbotapi.Message, chatID int64, db *database.DB) {
+func HandleAdminRequests(bot *tgbotapi.BotAPI, update tgbotapi.Update, chatID int64, db *database.DB, page int) {
+	const itemsPerPageFirstLast = 9
+	const itemsPerPageMiddle = 8
+
 	if !db.IsAdmin(chatID) {
-		msg := tgbotapi.NewMessage(chatID, "У вас нет прав главного администратора.")
+		msg := tgbotapi.NewMessage(chatID, "У вас нет прав администратора.")
 		if _, err := bot.Send(msg); err != nil {
 			log.Printf("Failed to send message to %v: %v", chatID, err)
 		}
@@ -57,7 +70,7 @@ func HandleAdminRequests(bot *tgbotapi.BotAPI, message *tgbotapi.Message, chatID
 	requests, err := db.GetAdminRequests()
 	if err != nil {
 		log.Printf("Failed to get admin requests: %v", err)
-		msg := tgbotapi.NewMessage(chatID, "Не удалось получить заявки на админство.")
+		msg := tgbotapi.NewMessage(chatID, "Не удалось получить заявки на админа.")
 		if _, err := bot.Send(msg); err != nil {
 			log.Printf("Failed to send message to %v: %v", chatID, err)
 		}
@@ -65,29 +78,58 @@ func HandleAdminRequests(bot *tgbotapi.BotAPI, message *tgbotapi.Message, chatID
 	}
 
 	if len(requests) == 0 {
-		msg := tgbotapi.NewMessage(chatID, "Заявок на админство нет.")
+		msg := tgbotapi.NewMessage(chatID, "Заявок на админа нет.")
 		if _, err := bot.Send(msg); err != nil {
 			log.Printf("Failed to send message to %v: %v", chatID, err)
 		}
 		return
 	}
 
-	var rows [][]tgbotapi.InlineKeyboardButton
-	for _, request := range requests {
-		log.Printf("Processing admin request: %d", request)
+	var startIndex, endIndex int
+	if page == 0 {
+		startIndex = 0
+		endIndex = itemsPerPageFirstLast
+	} else {
+		startIndex = itemsPerPageFirstLast + (page-1)*itemsPerPageMiddle
+		endIndex = startIndex + itemsPerPageMiddle
+	}
+
+	if endIndex > len(requests) {
+		endIndex = len(requests)
+	}
+
+	var buttons [][]tgbotapi.InlineKeyboardButton
+	for _, request := range requests[startIndex:endIndex] {
 		button := tgbotapi.NewInlineKeyboardButtonData(
-			fmt.Sprintf("Request %d", request), fmt.Sprintf("request_admin_%d", request))
-		rows = append(rows, tgbotapi.NewInlineKeyboardRow(button))
+			fmt.Sprintf("%d", request), fmt.Sprintf("request_admin_%d", request))
+		buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(button))
 	}
 
-	msg := tgbotapi.NewMessage(chatID, "Admin Requests:")
-	keyboard := tgbotapi.NewInlineKeyboardMarkup(rows...)
-	msg.ReplyMarkup = keyboard
-	if _, err := bot.Send(msg); err != nil {
-		log.Printf("Failed to send message to %v: %v", chatID, err)
+	var navigationButtons []tgbotapi.InlineKeyboardButton
+	if page > 0 {
+		navigationButtons = append(navigationButtons, tgbotapi.NewInlineKeyboardButtonData("⬅️ Назад", fmt.Sprintf("page_admin_request_%d", page-1)))
+	}
+	if endIndex < len(requests) {
+		navigationButtons = append(navigationButtons, tgbotapi.NewInlineKeyboardButtonData("Дальше ➡️", fmt.Sprintf("page_admin_request_%d", page+1)))
+	}
+	if len(navigationButtons) > 0 {
+		buttons = append(buttons, navigationButtons)
 	}
 
-	//editAdminRequestList(bot, message, db)
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons...)
+	if update.CallbackQuery == nil {
+		msg := tgbotapi.NewMessage(chatID, "Заявки на админа:")
+		msg.ReplyMarkup = keyboard
+		if _, err := bot.Send(msg); err != nil {
+			log.Printf("Failed to send message to %v: %v", chatID, err)
+		}
+	} else {
+		editMsg := tgbotapi.NewEditMessageText(chatID, update.CallbackQuery.Message.MessageID, "Заявки на админа:")
+		editMsg.ReplyMarkup = &keyboard
+		if _, err := bot.Send(editMsg); err != nil {
+			log.Printf("Failed to edit message for %v: %v", chatID, err)
+		}
+	}
 }
 
 func HandleAdminRequestCallback(bot *tgbotapi.BotAPI, callbackQuery *tgbotapi.CallbackQuery, db *database.DB, inProcessAdminReq *map[int64]bool) {
@@ -198,34 +240,6 @@ func editAdminRequestList(bot *tgbotapi.BotAPI, message *tgbotapi.Message, db *d
 	}
 }
 
-func HandleGetAdminsInfo(bot *tgbotapi.BotAPI, chatID int64, db *database.DB) {
-	adminsList := db.GetAdmins()
-	if len(adminsList) == 0 {
-		msg := tgbotapi.NewMessage(chatID, "Список админов пуст.")
-		if _, err := bot.Send(msg); err != nil {
-			log.Printf("Send message error to %v: %v", chatID, err)
-		}
-		return
-	}
-
-	var rows [][]tgbotapi.InlineKeyboardButton
-	for adminID := range adminsList {
-		button := tgbotapi.NewInlineKeyboardButtonData(
-			fmt.Sprintf("Admin ID: %d", adminID),
-			fmt.Sprintf("get_admin_info_%d", adminID),
-		)
-		rows = append(rows, tgbotapi.NewInlineKeyboardRow(button))
-	}
-
-	keyboard := tgbotapi.NewInlineKeyboardMarkup(rows...)
-	msg := tgbotapi.NewMessage(chatID, "Выберите ID админа для получения информации:")
-	msg.ReplyMarkup = keyboard
-
-	if _, err := bot.Send(msg); err != nil {
-		log.Printf("Send message error to %v: %v", chatID, err)
-	}
-}
-
 func HandleAdminInfoCallback(bot *tgbotapi.BotAPI, callbackQuery *tgbotapi.CallbackQuery, db *database.DB) {
 	data := strings.TrimPrefix(callbackQuery.Data, "get_admin_info_")
 	adminID, err := strconv.ParseInt(data, 10, 64)
@@ -239,19 +253,80 @@ func HandleAdminInfoCallback(bot *tgbotapi.BotAPI, callbackQuery *tgbotapi.Callb
 		log.Printf("Failed to get admin info: %v", err)
 	}
 
-	//adminsList := db.GetAdmins()
-
-	//adminInfo, exists := adminsList[adminID]
-	//if !exists {
-	//	msg := tgbotapi.NewMessage(callbackQuery.Message.Chat.ID, "Информация об админе не найдена.")
-	//	if _, err := bot.Send(msg); err != nil {
-	//		log.Printf("Send message error to %v: %v", callbackQuery.Message.Chat.ID, err)
-	//	}
-	//	return
-	//}
-
 	msg := tgbotapi.NewMessage(callbackQuery.Message.Chat.ID, fmt.Sprintf("Информация об админе %d:\n%s", adminID, adminInfo))
 	if _, err := bot.Send(msg); err != nil {
 		log.Printf("Send message error to %v: %v", callbackQuery.Message.Chat.ID, err)
+	}
+}
+
+func GetAdmins(bot *tgbotapi.BotAPI, update tgbotapi.Update, adminID int64, db *database.DB, page int) {
+	const itemsPerPageFirstLast = 9
+	const itemsPerPageMiddle = 8
+
+	if !db.IsAdmin(adminID) {
+		msg := tgbotapi.NewMessage(adminID, "У вас нет прав администратора.")
+		if _, err := bot.Send(msg); err != nil {
+			log.Printf("Failed to send message to %v: %v", adminID, err)
+		}
+		return
+	}
+
+	admins := db.GetAdmins()
+	if len(admins) == 0 {
+		msg := tgbotapi.NewMessage(adminID, "Админов нет.")
+		if _, err := bot.Send(msg); err != nil {
+			log.Printf("Failed to send message to %v: %v", adminID, err)
+		}
+		return
+	}
+	var adminIDs []int64
+	for id := range admins {
+		adminIDs = append(adminIDs, id)
+	}
+
+	var startIndex, endIndex int
+	if page == 0 {
+		startIndex = 0
+		endIndex = itemsPerPageFirstLast
+	} else {
+		startIndex = itemsPerPageFirstLast + (page-1)*itemsPerPageMiddle
+		endIndex = startIndex + itemsPerPageMiddle
+	}
+
+	if endIndex > len(admins) {
+		endIndex = len(admins)
+	}
+
+	var buttons [][]tgbotapi.InlineKeyboardButton
+	for _, admin := range adminIDs[startIndex:endIndex] {
+		button := tgbotapi.NewInlineKeyboardButtonData(
+			fmt.Sprintf("%d", admin), fmt.Sprintf("admin_%d", admin))
+		buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(button))
+	}
+
+	var navigationButtons []tgbotapi.InlineKeyboardButton
+	if page > 0 {
+		navigationButtons = append(navigationButtons, tgbotapi.NewInlineKeyboardButtonData("⬅️ Назад", fmt.Sprintf("page_admins_%d", page-1)))
+	}
+	if endIndex < len(admins) {
+		navigationButtons = append(navigationButtons, tgbotapi.NewInlineKeyboardButtonData("Дальше ➡️", fmt.Sprintf("page_admins_%d", page+1)))
+	}
+	if len(navigationButtons) > 0 {
+		buttons = append(buttons, navigationButtons)
+	}
+
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons...)
+	if update.CallbackQuery == nil {
+		msg := tgbotapi.NewMessage(adminID, "Список админов:")
+		msg.ReplyMarkup = keyboard
+		if _, err := bot.Send(msg); err != nil {
+			log.Printf("Failed to send message to %v: %v", adminID, err)
+		}
+	} else {
+		editMsg := tgbotapi.NewEditMessageText(adminID, update.CallbackQuery.Message.MessageID, "Список подписчиков:")
+		editMsg.ReplyMarkup = &keyboard
+		if _, err := bot.Send(editMsg); err != nil {
+			log.Printf("Failed to edit message for %v: %v", adminID, err)
+		}
 	}
 }
