@@ -13,7 +13,7 @@ func HandleGetSubjects(bot *tgbotapi.BotAPI, update tgbotapi.Update, chatID int6
 	const itemsPerPageMiddle = 8
 	subjects := db.GetSubjects()
 	if len(subjects) == 0 {
-		msg := tgbotapi.NewMessage(chatID, "No subjects found.")
+		msg := tgbotapi.NewMessage(chatID, "Предмет не найден")
 		if _, err := bot.Send(msg); err != nil {
 			log.Printf("Send message error to %v: %v", chatID, err)
 		}
@@ -54,13 +54,13 @@ func HandleGetSubjects(bot *tgbotapi.BotAPI, update tgbotapi.Update, chatID int6
 
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons...)
 	if update.CallbackQuery == nil {
-		msg := tgbotapi.NewMessage(chatID, "Select a subject:")
+		msg := tgbotapi.NewMessage(chatID, "Выберите предмет:")
 		msg.ReplyMarkup = keyboard
 		if _, err := bot.Send(msg); err != nil {
 			log.Printf("Send message error to %v: %v", chatID, err)
 		}
 	} else {
-		editMsg := tgbotapi.NewEditMessageText(chatID, update.CallbackQuery.Message.MessageID, "Select a subject:")
+		editMsg := tgbotapi.NewEditMessageText(chatID, update.CallbackQuery.Message.MessageID, "Выбрите предмет")
 		editMsg.ReplyMarkup = &keyboard
 		if _, err := bot.Send(editMsg); err != nil {
 			log.Printf("Edit message error to %v: %v", chatID, err)
@@ -73,7 +73,7 @@ func handleGetControlElements(bot *tgbotapi.BotAPI, update tgbotapi.Update, chat
 	const itemsPerPageMiddle = 7
 	controlElements := db.GetControlElements(subject)
 	if len(controlElements) == 0 {
-		msg := tgbotapi.NewMessage(chatID, "No control elements found.")
+		msg := tgbotapi.NewMessage(chatID, "Элемент контроля не найден")
 		if _, err := bot.Send(msg); err != nil {
 			log.Printf("Send message error to %v: %v", chatID, err)
 		}
@@ -111,11 +111,11 @@ func handleGetControlElements(bot *tgbotapi.BotAPI, update tgbotapi.Update, chat
 	if len(navigationButtons) > 0 {
 		buttons = append(buttons, navigationButtons)
 	}
-	navigationButtons = append(navigationButtons, tgbotapi.NewInlineKeyboardButtonData("Back", "back_to_subjects"))
+	navigationButtons = append(navigationButtons, tgbotapi.NewInlineKeyboardButtonData("Вернуться", "back_to_subjects"))
 	buttons = append(buttons, navigationButtons)
 
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons...)
-	editMsg := tgbotapi.NewEditMessageText(chatID, update.CallbackQuery.Message.MessageID, "Select a control element:")
+	editMsg := tgbotapi.NewEditMessageText(chatID, update.CallbackQuery.Message.MessageID, "Выберите элемент контроля:")
 	editMsg.ReplyMarkup = &keyboard
 	if _, err := bot.Send(editMsg); err != nil {
 		log.Printf("Edit message error to %v: %v", chatID, err)
@@ -127,14 +127,14 @@ func handleGetElementNumbers(bot *tgbotapi.BotAPI, update tgbotapi.Update, chatI
 	const itemsPerPageMiddle = 7
 	elementNumbers := db.GetElementNumber(subject, controlElement)
 	if len(elementNumbers) == 0 {
-		msg := tgbotapi.NewMessage(chatID, "No element numbers found.")
+		msg := tgbotapi.NewMessage(chatID, "Элемент контроля не найден")
 		if _, err := bot.Send(msg); err != nil {
 			log.Printf("Send message error to %v: %v", chatID, err)
 		}
 		return
 	}
 
-	sort.Ints(elementNumbers)
+	sort.Strings(elementNumbers)
 	var startIndex, endIndex int
 	if page == 0 {
 		startIndex = 0
@@ -151,7 +151,7 @@ func handleGetElementNumbers(bot *tgbotapi.BotAPI, update tgbotapi.Update, chatI
 	var buttons [][]tgbotapi.InlineKeyboardButton
 	for _, number := range elementNumbers[startIndex:endIndex] {
 		button := tgbotapi.NewInlineKeyboardButtonData(
-			fmt.Sprintf("%d", number), fmt.Sprintf("number_%d", number))
+			fmt.Sprintf("%s", number), fmt.Sprintf("number_%s", number))
 		buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(button))
 	}
 
@@ -162,11 +162,11 @@ func handleGetElementNumbers(bot *tgbotapi.BotAPI, update tgbotapi.Update, chatI
 	if endIndex < len(elementNumbers) {
 		navigationButtons = append(navigationButtons, tgbotapi.NewInlineKeyboardButtonData("Дальше ➡️", fmt.Sprintf("page_elements_%d", page+1)))
 	}
-	navigationButtons = append(navigationButtons, tgbotapi.NewInlineKeyboardButtonData("Back", "back_to_controls"))
+	navigationButtons = append(navigationButtons, tgbotapi.NewInlineKeyboardButtonData("Вернуться", "back_to_controls"))
 	buttons = append(buttons, navigationButtons)
 
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons...)
-	editMsg := tgbotapi.NewEditMessageText(chatID, update.CallbackQuery.Message.MessageID, "Select a number:")
+	editMsg := tgbotapi.NewEditMessageText(chatID, update.CallbackQuery.Message.MessageID, "Выберите номер:")
 	editMsg.ReplyMarkup = &keyboard
 	if _, err := bot.Send(editMsg); err != nil {
 		log.Printf("Edit message error to %v: %v", chatID, err)

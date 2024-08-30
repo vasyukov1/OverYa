@@ -10,13 +10,13 @@ import (
 
 // ----------------------- MATERIALS -----------------------
 
-func (db *DB) AddMaterial(subjectName string, controlElement string, elementNumber int, fileIDs []string, description string) error {
+func (db *DB) AddMaterial(subjectName string, controlElement string, elementNumber string, fileIDs []string, description string) error {
 	query := "INSERT INTO Materials (SubjectName, ControlElement, ElementNumber, FileIDs, Description) VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING"
 	_, err := db.Exec(query, subjectName, controlElement, elementNumber, pq.Array(fileIDs), description)
 	return err
 }
 
-func (db *DB) RemoveMaterial(subjectName string, controlElement string, elementNumber int) error {
+func (db *DB) RemoveMaterial(subjectName string, controlElement string, elementNumber string) error {
 	query := `
 		DELETE FROM Materials
 		WHERE SubjectName = $1 AND ControlElement = $2 AND ElementNumber = $3;
@@ -43,7 +43,7 @@ func (db *DB) RemoveMaterialBySubject(subjectName string) error {
 	return nil
 }
 
-func (db *DB) IsMaterialExists(subjectName string, controlElement string, elementNumber int) bool {
+func (db *DB) IsMaterialExists(subjectName string, controlElement string, elementNumber string) bool {
 	query := `
 		SELECT EXISTS(
 			SELECT 1
@@ -76,7 +76,7 @@ func (db *DB) CountMaterialForSubject(subject string) int {
 	return count
 }
 
-func (db *DB) GetMaterial(subject string, controlElement string, elementNumber int) ([]string, string, error) {
+func (db *DB) GetMaterial(subject string, controlElement string, elementNumber string) ([]string, string, error) {
 	var fileIDs []string
 	var description string
 
@@ -129,7 +129,7 @@ func (db *DB) GetControlElements(subject string) []string {
 	return controlElements
 }
 
-func (db *DB) GetElementNumber(subject string, controlElement string) []int {
+func (db *DB) GetElementNumber(subject string, controlElement string) []string {
 	query := `
 		SELECT DISTINCT ElementNumber 
 		FROM Materials 
@@ -147,9 +147,9 @@ func (db *DB) GetElementNumber(subject string, controlElement string) []int {
 		}
 	}(rows)
 
-	var numbers []int
+	var numbers []string
 	for rows.Next() {
-		var number int
+		var number string
 		if err = rows.Scan(&number); err != nil {
 			log.Printf("Error scanning element number: %v\n", err)
 			continue
@@ -168,7 +168,7 @@ func (db *DB) GetElementNumber(subject string, controlElement string) []int {
 // -------------------- EDITION --------------------
 
 // EditName has some problems ??
-func (db *DB) EditName(subject string, controlElement string, number int, old []string) error {
+func (db *DB) EditName(subject string, controlElement string, number string, old []string) error {
 	query := `
 		UPDATE Materials
 		SET SubjectName = $1, ControlElement = $2, ElementNumber = $3

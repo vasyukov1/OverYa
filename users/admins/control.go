@@ -12,7 +12,7 @@ import (
 func AddAdmin(bot *tgbotapi.BotAPI, chatID int64, db *database.DB) {
 	db.AddAdmin(chatID)
 	log.Printf("Added admin %v", chatID)
-	msg := tgbotapi.NewMessage(chatID, "You are now an admin!")
+	msg := tgbotapi.NewMessage(chatID, "Теперь вы админ")
 	if _, err := bot.Send(msg); err != nil {
 		log.Printf("Send admin request error: %v", err)
 	}
@@ -24,13 +24,13 @@ func SendAdminRequest(bot *tgbotapi.BotAPI, chatID int64, mainAdmin int64, db *d
 	userName := chat.UserName
 	if err := db.AddAdminRequest(chatID, firstName, lastName, userName); err != nil {
 		log.Printf("Send admin request error: %v", err)
-		msg := tgbotapi.NewMessage(chatID, "We have problem with your admin request, sorry")
+		msg := tgbotapi.NewMessage(chatID, "Произошла ошибка с вашей заявкой на админство")
 		if _, err := bot.Send(msg); err != nil {
 			log.Printf("Send admin request error: %v", err)
 		}
 	} else {
 		msg := tgbotapi.NewMessage(mainAdmin, "")
-		msg.Text = fmt.Sprintf("You have new admin request! \nAll /requests_admin: %v", db.CountAdminRequest())
+		msg.Text = fmt.Sprintf("У вас новая заявка на админство! \nПосмотреть /requests_admin: %v", db.CountAdminRequest())
 		if _, err := bot.Send(msg); err != nil {
 			log.Printf("Send admin request error: %v", err)
 		}
@@ -41,14 +41,22 @@ func DeleteAdmin(bot *tgbotapi.BotAPI, chatID int64, mainAdmin int64, db *databa
 	if !db.IsAdmin(chatID) {
 		log.Printf("Can't delete %v, is not an admin", chatID)
 		msg := tgbotapi.NewMessage(mainAdmin, "")
-		msg.Text = "You are not an admin."
+		msg.Text = "Вы не админ"
 		if _, err := bot.Send(msg); err != nil {
 			log.Printf("Send admin request error: %v", err)
 		}
 		return false
 	}
+	if chatID == mainAdmin {
+		msg := tgbotapi.NewMessage(mainAdmin, "")
+		msg.Text = "Не надо удалять себя"
+		if _, err := bot.Send(msg); err != nil {
+			log.Printf("Error sending message: %v", err)
+		}
+		return false
+	}
 	db.DeleteAdmin(chatID)
-	msg := tgbotapi.NewMessage(chatID, "You aren't now an admin(")
+	msg := tgbotapi.NewMessage(chatID, "Теперь вы не админ")
 	if _, err := bot.Send(msg); err != nil {
 		log.Printf("Send admin request error: %v", err)
 	}
@@ -70,7 +78,7 @@ func HandleAdminRequests(bot *tgbotapi.BotAPI, update tgbotapi.Update, chatID in
 	requests, err := db.GetAdminRequests()
 	if err != nil {
 		log.Printf("Failed to get admin requests: %v", err)
-		msg := tgbotapi.NewMessage(chatID, "Не удалось получить заявки на админа.")
+		msg := tgbotapi.NewMessage(chatID, "Не удалось получить заявки на админство")
 		if _, err := bot.Send(msg); err != nil {
 			log.Printf("Failed to send message to %v: %v", chatID, err)
 		}
@@ -78,7 +86,7 @@ func HandleAdminRequests(bot *tgbotapi.BotAPI, update tgbotapi.Update, chatID in
 	}
 
 	if len(requests) == 0 {
-		msg := tgbotapi.NewMessage(chatID, "Заявок на админа нет.")
+		msg := tgbotapi.NewMessage(chatID, "Заявок на админство нет")
 		if _, err := bot.Send(msg); err != nil {
 			log.Printf("Failed to send message to %v: %v", chatID, err)
 		}
@@ -118,7 +126,7 @@ func HandleAdminRequests(bot *tgbotapi.BotAPI, update tgbotapi.Update, chatID in
 
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons...)
 	if update.CallbackQuery == nil {
-		msg := tgbotapi.NewMessage(chatID, "Заявки на админа:")
+		msg := tgbotapi.NewMessage(chatID, "Заявки на админство:")
 		msg.ReplyMarkup = keyboard
 		if _, err := bot.Send(msg); err != nil {
 			log.Printf("Failed to send message to %v: %v", chatID, err)
@@ -154,7 +162,7 @@ func HandleAdminRequestCallback(bot *tgbotapi.BotAPI, callbackQuery *tgbotapi.Ca
 			return
 		}
 
-		msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("Would you like to accept ADMIN request from ID: %d?\nInfo: %s", requestID, userInfo))
+		msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("Хотите назначить админом ID: %d?\nИнфо: %s", requestID, userInfo))
 		button := tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData("Повысить", fmt.Sprintf("accept_admin_%d", requestID)),
@@ -192,8 +200,8 @@ func HandleAdminRequestCallback(bot *tgbotapi.BotAPI, callbackQuery *tgbotapi.Ca
 		}
 		log.Printf("Rejecting admin request: %d", requestID)
 
-		msg := tgbotapi.NewMessage(requestID, "Вам отказано в повышении.")
-		msgAdmin := tgbotapi.NewMessage(chatID, fmt.Sprintf("%d остался на прежнем уровне.", requestID))
+		msg := tgbotapi.NewMessage(requestID, "Вам отказано в повышении")
+		msgAdmin := tgbotapi.NewMessage(chatID, fmt.Sprintf("%d остался на прежнем уровне", requestID))
 		if _, err := bot.Send(msgAdmin); err != nil {
 			log.Printf("Failed to send message to %v: %v", chatID, err)
 		}
@@ -218,7 +226,7 @@ func editAdminRequestList(bot *tgbotapi.BotAPI, message *tgbotapi.Message, db *d
 	}
 
 	if len(requests) == 0 {
-		editMsg := tgbotapi.NewEditMessageText(message.Chat.ID, message.MessageID, "Заявок на админство нет.")
+		editMsg := tgbotapi.NewEditMessageText(message.Chat.ID, message.MessageID, "Заявок на админство нет")
 		if _, err := bot.Send(editMsg); err != nil {
 			log.Printf("Failed to edit message: %v", err)
 		}
@@ -264,7 +272,7 @@ func GetAdmins(bot *tgbotapi.BotAPI, update tgbotapi.Update, adminID int64, db *
 	const itemsPerPageMiddle = 8
 
 	if !db.IsAdmin(adminID) {
-		msg := tgbotapi.NewMessage(adminID, "У вас нет прав администратора.")
+		msg := tgbotapi.NewMessage(adminID, "У вас нет прав администратора")
 		if _, err := bot.Send(msg); err != nil {
 			log.Printf("Failed to send message to %v: %v", adminID, err)
 		}
@@ -273,7 +281,7 @@ func GetAdmins(bot *tgbotapi.BotAPI, update tgbotapi.Update, adminID int64, db *
 
 	admins := db.GetAdmins()
 	if len(admins) == 0 {
-		msg := tgbotapi.NewMessage(adminID, "Админов нет.")
+		msg := tgbotapi.NewMessage(adminID, "Админов нет")
 		if _, err := bot.Send(msg); err != nil {
 			log.Printf("Failed to send message to %v: %v", adminID, err)
 		}

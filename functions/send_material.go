@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-func SendMaterial(bot *tgbotapi.BotAPI, chatID int64, db *database.DB, subject, controlElement string, number int) {
+func SendMaterial(bot *tgbotapi.BotAPI, chatID int64, db *database.DB, subject, controlElement string, number string) {
 	files, description, err := db.GetMaterial(subject, controlElement, number)
 	if err != nil {
 		log.Printf("Error getting materials: %v", err)

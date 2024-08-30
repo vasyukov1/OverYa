@@ -18,7 +18,7 @@ func HandleCallbackQuery(bot *tgbotapi.BotAPI, update tgbotapi.Update, db *datab
 	if db.IsAdmin(chatID) {
 		switch callbackData {
 		case "yes_description":
-			msg := tgbotapi.NewMessage(chatID, "Please provide the description")
+			msg := tgbotapi.NewMessage(chatID, "Отправьте описание")
 			if _, err := bot.Send(msg); err != nil {
 				log.Printf("Failed to send message to %v: %v", chatID, err)
 			}
@@ -133,12 +133,7 @@ func HandleCallbackQuery(bot *tgbotapi.BotAPI, update tgbotapi.Update, db *datab
 		handleGetElementNumbers(bot, update, chatID, db, userSubject[chatID], controlElement, 0)
 
 	} else if strings.HasPrefix(callbackData, "number_") {
-		numberStr := strings.TrimPrefix(callbackData, "number_")
-		number, err := strconv.Atoi(numberStr)
-		if err != nil {
-			log.Println("Invalid number:", numberStr)
-			return
-		}
+		number := strings.TrimPrefix(callbackData, "number_")
 		log.Printf("User %v choose element number: %v", chatID, number)
 		subject := userSubject[chatID]
 		controlElement := userControlElement[chatID]

@@ -5,7 +5,6 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/vasyukov1/Overbot/database"
 	"log"
-	"strconv"
 	"strings"
 )
 
@@ -34,11 +33,7 @@ func HandleAdminBroadcast(bot *tgbotapi.BotAPI, message *tgbotapi.Message, updat
 		if len(parts) == 3 {
 			subject := strings.TrimSpace(parts[0])
 			controlElement := strings.TrimSpace(parts[1])
-			number, err := strconv.Atoi(strings.TrimSpace(parts[2]))
-			if err != nil {
-				log.Printf("Error converting number to int: %v\n", err)
-				next = false
-			}
+			number := strings.TrimSpace(parts[2])
 
 			exists, err := db.SubjectExists(subject)
 			if err != nil {
@@ -79,14 +74,14 @@ func HandleAdminBroadcast(bot *tgbotapi.BotAPI, message *tgbotapi.Message, updat
 
 				return
 			}
-			GoToMain(chatID, db, bot)
+			//GoToMain(chatID, db, bot)
 		} else {
 			msg := tgbotapi.NewMessage(chatID, "")
-			msg.Text = fmt.Sprintf("Wrong name for material")
+			msg.Text = fmt.Sprintf("Неверное название материала")
 			if _, err := bot.Send(msg); err != nil {
 				log.Printf("Failed to send message to %v: %v", chatID, err)
 			}
-			GoToMain(chatID, db, bot)
+			//GoToMain(chatID, db, bot)
 		}
 		if next {
 			promptForAttachments(bot, chatID)
@@ -106,7 +101,7 @@ func HandleAdminBroadcast(bot *tgbotapi.BotAPI, message *tgbotapi.Message, updat
 	handleMediaAttachments(chatID, message)
 }
 
-func broadcast(bot *tgbotapi.BotAPI, chatID int64, message string, attachments []interface{}, description string, db *database.DB, telegramChannel int64) bool {
+func broadcast(bot *tgbotapi.BotAPI, adminID int64, message string, attachments []interface{}, description string, db *database.DB, telegramChannel int64) bool {
 	subscribers := db.GetSubscribers()
 	var groupPhoto []interface{}
 	var groupDocument []interface{}
@@ -124,11 +119,14 @@ func broadcast(bot *tgbotapi.BotAPI, chatID int64, message string, attachments [
 	}
 
 	parts := strings.Split(message, " ")
+	if len(parts) != 3 {
+		return false
+	}
 	subject := strings.TrimSpace(parts[0])
 	controlElement := strings.TrimSpace(parts[1])
-	number, err := strconv.Atoi(strings.TrimSpace(parts[2]))
+	number := strings.TrimSpace(parts[2])
 	links := saveInChannel(bot, telegramChannel, attachments)
-	err = db.AddMaterial(subject, controlElement, number, links, description)
+	err := db.AddMaterial(subject, controlElement, number, links, description)
 	if err != nil {
 		return false
 	}
@@ -181,11 +179,11 @@ func broadcast(bot *tgbotapi.BotAPI, chatID int64, message string, attachments [
 }
 
 func promptForDescriptionChoice(bot *tgbotapi.BotAPI, chatID int64) {
-	msg := tgbotapi.NewMessage(chatID, "Do you want to add a description?")
+	msg := tgbotapi.NewMessage(chatID, "Хотите добавить описание?")
 	buttons := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("Yes", "yes_description"),
-			tgbotapi.NewInlineKeyboardButtonData("No", "no_description"),
+			tgbotapi.NewInlineKeyboardButtonData("Да", "yes_description"),
+			tgbotapi.NewInlineKeyboardButtonData("Нет", "no_description"),
 		),
 	)
 	msg.ReplyMarkup = buttons
@@ -195,7 +193,7 @@ func promptForDescriptionChoice(bot *tgbotapi.BotAPI, chatID int64) {
 }
 
 func promptForAttachments(bot *tgbotapi.BotAPI, chatID int64) {
-	msg := tgbotapi.NewMessage(chatID, "Attach media (photo, video, file) and send /ok when done.")
+	msg := tgbotapi.NewMessage(chatID, "Прикрепите медиа (фото, видео, файлы) и после этого нажмите /ok")
 	if _, err := bot.Send(msg); err != nil {
 		log.Printf("Failed to send message to %v: %v", chatID, err)
 	}
@@ -207,12 +205,12 @@ func sendBroadcast(bot *tgbotapi.BotAPI, chatID int64, db *database.DB, telegram
 		description[chatID] = ""
 		broadcastMsg[chatID] = ""
 		attachmentQueue[chatID] = []interface{}{}
-		msg := tgbotapi.NewMessage(chatID, "Broadcast sent to all subscribers.")
+		msg := tgbotapi.NewMessage(chatID, "Рассылка отправлена всем подписчикам")
 		if _, err := bot.Send(msg); err != nil {
 			log.Printf("Failed to send message to %v: %v", chatID, err)
 		}
 	} else {
-		msg := tgbotapi.NewMessage(chatID, "Broadcast is fail.")
+		msg := tgbotapi.NewMessage(chatID, "Ошибка рассылки")
 		if _, err := bot.Send(msg); err != nil {
 			log.Printf("Failed to send message to %v: %v", chatID, err)
 		}

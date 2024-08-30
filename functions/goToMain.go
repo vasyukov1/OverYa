@@ -15,6 +15,7 @@ func GoToMain(chatID int64, db *database.DB, bot *tgbotapi.BotAPI) {
 	IsDeleteAdminMode = false
 	IsDeleteMaterialMode = false
 	IsDeleteSubjectMode = false
+	IsNewsMode[chatID] = false
 
 	msg := tgbotapi.NewMessage(chatID, "Hello, HSE Student!")
 	if _, err := bot.Send(msg); err != nil {

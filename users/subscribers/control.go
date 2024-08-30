@@ -12,7 +12,7 @@ import (
 func AddSubscriber(bot *tgbotapi.BotAPI, chatID int64, db *database.DB) {
 	db.AddSubscriber(chatID)
 	log.Printf("Added subscriber %v", chatID)
-	msg := tgbotapi.NewMessage(chatID, "You are now a subscriber!")
+	msg := tgbotapi.NewMessage(chatID, "Теперь вы подписчик!")
 	if _, err := bot.Send(msg); err != nil {
 		log.Printf("Error sending message: %v", err)
 	}
@@ -24,13 +24,13 @@ func SendSubscribeRequest(bot *tgbotapi.BotAPI, chatID int64, mainAdmin int64, d
 	userName := chat.UserName
 	if err := db.AddSubscriberRequest(chatID, firstName, lastName, userName); err != nil {
 		log.Printf("Send subscribe request error: %v", err)
-		msg := tgbotapi.NewMessage(chatID, "We have problem with your request, sorry")
+		msg := tgbotapi.NewMessage(chatID, "Возникла проблема с вашей заявкой")
 		if _, err := bot.Send(msg); err != nil {
 			log.Printf("Error sending message: %v", err)
 		}
 	} else {
 		msg := tgbotapi.NewMessage(mainAdmin, "")
-		msg.Text = fmt.Sprintf("You have new subscriber request! \nAll /requests_subscriber: %v", db.CountSubscriberRequest())
+		msg.Text = fmt.Sprintf("У вас есть новая заявка на подписку! \nПосмотреть /requests_subscriber: %v", db.CountSubscriberRequest())
 		if _, err := bot.Send(msg); err != nil {
 			log.Printf("Error sending message: %v", err)
 		}
@@ -41,7 +41,15 @@ func DeleteSubscriber(bot *tgbotapi.BotAPI, chatID int64, mainAdmin int64, db *d
 	if !db.IsSubscriber(chatID) {
 		log.Printf("Can't delete %v, is not a subscriber", chatID)
 		msg := tgbotapi.NewMessage(mainAdmin, "")
-		msg.Text = "It is not a subscriber."
+		msg.Text = "Это не подписчик"
+		if _, err := bot.Send(msg); err != nil {
+			log.Printf("Error sending message: %v", err)
+		}
+		return false
+	}
+	if chatID == mainAdmin {
+		msg := tgbotapi.NewMessage(mainAdmin, "")
+		msg.Text = "Не надо удалять себя"
 		if _, err := bot.Send(msg); err != nil {
 			log.Printf("Error sending message: %v", err)
 		}
@@ -49,13 +57,13 @@ func DeleteSubscriber(bot *tgbotapi.BotAPI, chatID int64, mainAdmin int64, db *d
 	}
 	if db.IsAdmin(chatID) {
 		db.DeleteAdmin(chatID)
-		msg := tgbotapi.NewMessage(chatID, "*You aren't now an admin*")
+		msg := tgbotapi.NewMessage(chatID, "Теперь вы не админ")
 		if _, err := bot.Send(msg); err != nil {
 			log.Printf("Error sending message: %v", err)
 		}
 	}
 	db.DeleteSubscriber(chatID)
-	msg := tgbotapi.NewMessage(chatID, "*You aren't now a subscriber(*")
+	msg := tgbotapi.NewMessage(chatID, "Теперь вы не подписчик")
 	if _, err := bot.Send(msg); err != nil {
 		log.Printf("Error sending message: %v", err)
 	}
@@ -67,7 +75,7 @@ func GetSubscribers(bot *tgbotapi.BotAPI, update tgbotapi.Update, adminID int64,
 	const itemsPerPageMiddle = 8
 
 	if !db.IsAdmin(adminID) {
-		msg := tgbotapi.NewMessage(adminID, "У вас нет прав администратора.")
+		msg := tgbotapi.NewMessage(adminID, "У вас нет прав администратора")
 		if _, err := bot.Send(msg); err != nil {
 			log.Printf("Failed to send message to %v: %v", adminID, err)
 		}
@@ -76,7 +84,7 @@ func GetSubscribers(bot *tgbotapi.BotAPI, update tgbotapi.Update, adminID int64,
 
 	subscribers := db.GetSubscribers()
 	if len(subscribers) == 0 {
-		msg := tgbotapi.NewMessage(adminID, "Подписчиков нет.")
+		msg := tgbotapi.NewMessage(adminID, "Подписчиков нет")
 		if _, err := bot.Send(msg); err != nil {
 			log.Printf("Failed to send message to %v: %v", adminID, err)
 		}
@@ -139,7 +147,7 @@ func HandleSubscriberRequests(bot *tgbotapi.BotAPI, update tgbotapi.Update, chat
 	const itemsPerPageMiddle = 8
 
 	if !db.IsAdmin(chatID) {
-		msg := tgbotapi.NewMessage(chatID, "У вас нет прав администратора.")
+		msg := tgbotapi.NewMessage(chatID, "У вас нет прав администратора")
 		if _, err := bot.Send(msg); err != nil {
 			log.Printf("Failed to send message to %v: %v", chatID, err)
 		}
@@ -149,7 +157,7 @@ func HandleSubscriberRequests(bot *tgbotapi.BotAPI, update tgbotapi.Update, chat
 	requests, err := db.GetSubscriberRequests()
 	if err != nil {
 		log.Printf("Failed to get subscriber requests: %v", err)
-		msg := tgbotapi.NewMessage(chatID, "Не удалось получить заявки на подписку.")
+		msg := tgbotapi.NewMessage(chatID, "Не удалось получить заявки на подписку")
 		if _, err := bot.Send(msg); err != nil {
 			log.Printf("Failed to send message to %v: %v", chatID, err)
 		}
@@ -157,7 +165,7 @@ func HandleSubscriberRequests(bot *tgbotapi.BotAPI, update tgbotapi.Update, chat
 	}
 
 	if len(requests) == 0 {
-		msg := tgbotapi.NewMessage(chatID, "Заявок на подписку нет.")
+		msg := tgbotapi.NewMessage(chatID, "Заявок на подписку нет")
 		if _, err := bot.Send(msg); err != nil {
 			log.Printf("Failed to send message to %v: %v", chatID, err)
 		}
@@ -234,7 +242,7 @@ func HandleRequestCallback(bot *tgbotapi.BotAPI, callbackQuery *tgbotapi.Callbac
 		}
 
 		msg := tgbotapi.NewMessage(chatID, "")
-		msg.Text = fmt.Sprintf("Would you like to accept request from ID: %d?\nInfo: %s", requestID, userInfo)
+		msg.Text = fmt.Sprintf("Вы хотите принять заявку на подписку от ID: %d?\nИнфо: %s", requestID, userInfo)
 
 		button := tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
@@ -258,7 +266,7 @@ func HandleRequestCallback(bot *tgbotapi.BotAPI, callbackQuery *tgbotapi.Callbac
 		log.Printf("Accepting subscriber request: %d", requestID)
 		db.AddSubscriber(requestID)
 		msg := tgbotapi.NewMessage(requestID, "Ваша заявка принята, теперь вы подписчик!")
-		msgAdmin := tgbotapi.NewMessage(chatID, fmt.Sprintf("Заявка от %d принята.", requestID))
+		msgAdmin := tgbotapi.NewMessage(chatID, fmt.Sprintf("Заявка от %d принята", requestID))
 		if _, err := bot.Send(msgAdmin); err != nil {
 			log.Printf("Failed to send message to %v: %v", chatID, err)
 		}
@@ -273,8 +281,8 @@ func HandleRequestCallback(bot *tgbotapi.BotAPI, callbackQuery *tgbotapi.Callbac
 			return
 		}
 		log.Printf("Rejecting subscriber request: %d", requestID)
-		msg := tgbotapi.NewMessage(requestID, "Ваша заявка отклонена.")
-		msgAdmin := tgbotapi.NewMessage(chatID, fmt.Sprintf("Заявка от %d отклонена.", requestID))
+		msg := tgbotapi.NewMessage(requestID, "Ваша заявка отклонена")
+		msgAdmin := tgbotapi.NewMessage(chatID, fmt.Sprintf("Заявка от %d отклонена", requestID))
 		if _, err := bot.Send(msgAdmin); err != nil {
 			log.Printf("Failed to send message to %v: %v", chatID, err)
 		}
@@ -296,7 +304,7 @@ func editRequestList(bot *tgbotapi.BotAPI, message *tgbotapi.Message, db *databa
 		return
 	}
 	if len(requests) == 0 {
-		editMsg := tgbotapi.NewEditMessageText(message.Chat.ID, message.MessageID, "Заявок нет.")
+		editMsg := tgbotapi.NewEditMessageText(message.Chat.ID, message.MessageID, "Заявок нет")
 		if _, err := bot.Send(editMsg); err != nil {
 			log.Printf("Failed to edit message: %v", err)
 		}

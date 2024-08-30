@@ -5,7 +5,7 @@ import (
 	"log"
 )
 
-func EditName(subject string, controlElement string, number int, old []string, db *database.DB) bool {
+func EditName(subject string, controlElement string, number string, old []string, db *database.DB) bool {
 	if err := db.EditName(subject, controlElement, number, old); err != nil {
 		log.Printf("EditName Error: %v\n", err)
 		return false
