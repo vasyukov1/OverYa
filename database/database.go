@@ -4,15 +4,8 @@ import (
 	"database/sql"
 	"fmt"
 	_ "github.com/lib/pq"
+	"github.com/vasyukov1/Overbot/config"
 	"log"
-)
-
-const (
-	host     = "localhost"
-	port     = 5432
-	user     = "alexvasyukov"
-	password = "123"
-	dbname   = "postgres"
 )
 
 type DB struct {
@@ -20,6 +13,13 @@ type DB struct {
 }
 
 func NewDB() (*DB, error) {
+	cfg := config.LoadConfig()
+	host := cfg.Host
+	port := cfg.Port
+	user := cfg.User
+	password := cfg.Password
+	dbname := cfg.Dbname
+
 	dbInfo := fmt.Sprintf("host=%s port=%d user=%s "+
 		"password=%s dbname=%s sslmode=disable",
 		host, port, user, password, dbname)
